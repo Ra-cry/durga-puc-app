@@ -1,0 +1,376 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import {
+  validateVehicleNo,
+  computeValidTillClient,
+  formatIST,
+  getValidityLabel,
+} from '@/lib/clientHelpers';
+
+interface CreatePucModalProps {
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+const BS_STAGES = ['BS1', 'BS2', 'BS3', 'BS4', 'BS6'] as const;
+const FUEL_TYPES = ['Diesel', 'Petrol', 'Gas'] as const;
+
+export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalProps) {
+  const [form, setForm] = useState({
+    vehicleNo: '',
+    bsStage: '',
+    fuelType: '',
+    customerName: '',
+    customerPhone: '',
+    agent: '',
+  });
+  const [validityPreview, setValidityPreview] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState('');
+
+  // Update validity preview whenever bsStage changes
+  useEffect(() => {
+    if (form.bsStage) {
+      const now = new Date();
+      const till = computeValidTillClient(now, form.bsStage);
+      setValidityPreview(
+        `Valid till: ${formatIST(till)} (${getValidityLabel(form.bsStage)})`
+      );
+    } else {
+      setValidityPreview('');
+    }
+  }, [form.bsStage]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: name === 'vehicleNo' ? value.toUpperCase() : value,
+    }));
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  const validate = useCallback(() => {
+    const newErrors: Record<string, string> = {};
+
+    if (!form.vehicleNo.trim()) {
+      newErrors.vehicleNo = 'Vehicle number is required';
+    } else if (!validateVehicleNo(form.vehicleNo)) {
+      newErrors.vehicleNo = 'Invalid format. Expected: AP03AB1234';
+    }
+
+    if (!form.bsStage) newErrors.bsStage = 'BS Stage is required';
+    if (!form.fuelType) newErrors.fuelType = 'Fuel type is required';
+    if (!form.customerName.trim()) newErrors.customerName = 'Customer name is required';
+
+    if (!form.customerPhone.trim()) {
+      newErrors.customerPhone = 'Phone number is required';
+    } else if (!/^\d{10}$/.test(form.customerPhone.trim())) {
+      newErrors.customerPhone = 'Phone must be exactly 10 digits';
+    }
+
+    return newErrors;
+  }, [form]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setServerError('');
+
+    const newErrors = validate();
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/puc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vehicleNo: form.vehicleNo.trim().toUpperCase(),
+          bsStage: form.bsStage,
+          fuelType: form.fuelType,
+          customerName: form.customerName.trim(),
+          customerPhone: form.customerPhone.trim(),
+          agent: form.agent.trim() || null,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setServerError(data.error || 'Failed to create record');
+        return;
+      }
+
+      onSuccess();
+    } catch {
+      setServerError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Close on backdrop click
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  // Close on Escape
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={handleBackdropClick}>
+      <div className="modal-content glass-card p-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-bold text-white">Create PUC Certificate</h2>
+            <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
+              Fill in the details below to issue a new certificate
+            </p>
+          </div>
+          <button
+            id="create-puc-close"
+            onClick={onClose}
+            className="p-2 rounded-lg transition-colors hover:bg-slate-800"
+            style={{ color: '#64748b' }}
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
+
+        <form id="create-puc-form" onSubmit={handleSubmit} className="space-y-4">
+          {/* Vehicle No */}
+          <div>
+            <label className="form-label" htmlFor="puc-vehicleNo">
+              Vehicle Number <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <input
+              id="puc-vehicleNo"
+              name="vehicleNo"
+              type="text"
+              className="input-field"
+              placeholder="e.g. AP03AB1234"
+              value={form.vehicleNo}
+              onChange={handleChange}
+              maxLength={12}
+              autoFocus
+              style={errors.vehicleNo ? { borderColor: '#ef4444' } : {}}
+            />
+            {errors.vehicleNo && (
+              <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                {errors.vehicleNo}
+              </p>
+            )}
+          </div>
+
+          {/* BS Stage + Fuel — two columns */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="puc-bsStage">
+                BS Stage <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <select
+                id="puc-bsStage"
+                name="bsStage"
+                className="select-field"
+                value={form.bsStage}
+                onChange={handleChange}
+                style={errors.bsStage ? { borderColor: '#ef4444' } : {}}
+              >
+                <option value="">Select BS Stage</option>
+                {BS_STAGES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              {errors.bsStage && (
+                <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                  {errors.bsStage}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="form-label" htmlFor="puc-fuelType">
+                Fuel Type <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <select
+                id="puc-fuelType"
+                name="fuelType"
+                className="select-field"
+                value={form.fuelType}
+                onChange={handleChange}
+                style={errors.fuelType ? { borderColor: '#ef4444' } : {}}
+              >
+                <option value="">Select Fuel</option>
+                {FUEL_TYPES.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+              {errors.fuelType && (
+                <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                  {errors.fuelType}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Validity preview */}
+          {validityPreview && (
+            <div
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+              style={{
+                background: 'rgba(34,197,94,0.08)',
+                border: '1px solid rgba(34,197,94,0.2)',
+                color: '#4ade80',
+              }}
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {validityPreview}
+            </div>
+          )}
+
+          {/* Customer Name */}
+          <div>
+            <label className="form-label" htmlFor="puc-customerName">
+              Customer Name <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <input
+              id="puc-customerName"
+              name="customerName"
+              type="text"
+              className="input-field"
+              placeholder="Full name"
+              value={form.customerName}
+              onChange={handleChange}
+              style={errors.customerName ? { borderColor: '#ef4444' } : {}}
+            />
+            {errors.customerName && (
+              <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                {errors.customerName}
+              </p>
+            )}
+          </div>
+
+          {/* Phone + Agent — two columns */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="puc-customerPhone">
+                Phone No <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                id="puc-customerPhone"
+                name="customerPhone"
+                type="tel"
+                className="input-field"
+                placeholder="10-digit number"
+                value={form.customerPhone}
+                onChange={handleChange}
+                maxLength={10}
+                style={errors.customerPhone ? { borderColor: '#ef4444' } : {}}
+              />
+              {errors.customerPhone && (
+                <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                  {errors.customerPhone}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="form-label" htmlFor="puc-agent">
+                Agent{' '}
+                <span className="normal-case font-normal" style={{ color: '#475569' }}>
+                  (optional)
+                </span>
+              </label>
+              <input
+                id="puc-agent"
+                name="agent"
+                type="text"
+                className="input-field"
+                placeholder="Agent name"
+                value={form.agent}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+
+          {serverError && (
+            <div
+              className="flex items-center gap-2 p-3 rounded-lg text-sm"
+              style={{
+                background: 'rgba(239,68,68,0.1)',
+                border: '1px solid rgba(239,68,68,0.2)',
+                color: '#f87171',
+              }}
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {serverError}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-2">
+            <button
+              id="create-puc-cancel"
+              type="button"
+              className="btn-secondary flex-1"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              id="create-puc-submit"
+              type="submit"
+              className="btn-primary flex-1"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <div className="spinner" style={{ width: 14, height: 14 }} />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+                  </svg>
+                  Issue Certificate
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
