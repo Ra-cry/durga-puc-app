@@ -6,11 +6,11 @@ import PucRecord from '@/models/PucRecord';
 import { utils, write } from 'xlsx';
 import { formatIST } from '@/lib/pucHelpers';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  await dbConnect();
 
   const { searchParams } = new URL(request.url);
   const startDate = searchParams.get('startDate');
@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get('type') || 'old'; // 'old' | 'expired'
 
   try {
+    await dbConnect();
+
     let query: Record<string, unknown> = {};
 
     if (type === 'expired') {
@@ -68,7 +70,6 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error('Export error:', err);
     return NextResponse.json({ error: 'Export failed' }, { status: 500 });
   }
 }
