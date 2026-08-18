@@ -10,52 +10,69 @@ import {
   nowIST,
 } from '@/lib/pucHelpers';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // Relaxed vehicle number — handles AP37CH01069 (5 digits), AP09AB1234 (4 digits), etc.
 function isValidVehicleNo(vno: string): boolean {
   const s = (vno || '').replace(/[\s\-_.]/g, '').toUpperCase();
   return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/.test(s);
 }
 
-// Find value from a row using multiple possible column names (case-insensitive)
-function getField(row: Record<string, any>, ...keys: string[]): any {
-  for (const key of keys) {
-    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
-      return row[key];
-    }
-    // Case-insensitive search
-    const keyLow = key.toLowerCase().trim().replace(/\s+/g, ' ');
-    for (const k of Object.keys(row)) {
-      if (k.toLowerCase().trim().replace(/\s+/g, ' ') === keyLow) {
-        if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
-          return row[k];
-        }
-      }
-    }
-  }
-  return undefined;
+function normKey(s: any): string {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 // Auto-detect header row index in raw 2D array
 function findHeaderRowIndex(rawRows: any[][]): number {
-  const headerKeywords = ['vehicle', 'bs', 'fuel', 'phone', 'date', 'class', 'issued'];
+  const headerKeywords = ['vehicle', 'veh', 'reg', 'bs', 'fuel', 'phone', 'mobile', 'date', 'class', 'issued'];
   for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
     const row = rawRows[i];
     if (!row || row.length === 0) continue;
-    const rowText = row.map((c: any) => String(c ?? '').toLowerCase());
     let matches = 0;
-    for (const kw of headerKeywords) {
-      if (rowText.some((cell: string) => cell.includes(kw))) matches++;
+    for (const cell of row) {
+      const cellClean = normKey(cell);
+      if (headerKeywords.some((kw) => cellClean.includes(kw))) matches++;
     }
-    if (matches >= 2) return i; // Found the header row
+    if (matches >= 2) return i;
   }
-  return 0; // Default to first row
+  return 0;
 }
+
+const COLUMN_PATTERNS: Record<string, string[]> = {
+  vehicleNo: ['vehicleno', 'vehno', 'vehiclenumber', 'regno', 'registrationno', 'vehnumber', 'regnno', 'vehicle', 'veh'],
+  vehicleClass: ['vehicleclass', 'vehclass', 'vehicletype', 'vehtype', 'class', 'category', 'type'],
+  bsStage: ['bsstage', 'bs', 'stage', 'emissionnorm', 'norm'],
+  fuel: ['fueltype', 'fuelname', 'fuel'],
+  customerName: ['customername', 'ownername', 'custname', 'customer', 'owner', 'name'],
+  customerPhone: ['customerphone', 'custphone', 'mobileno', 'phoneno', 'mobile', 'phone', 'contact', 'cellno', 'mobilenumber'],
+  agent: ['agentname', 'agent', 'broker', 'reference', 'operator', 'user'],
+  issuedDate: [
+    'issueddate',
+    'issuedat',
+    'issued',
+    'dateofissue',
+    'pucdate',
+    'certificatedate',
+    'certdate',
+    'docdate',
+    'testdate',
+    'fromdate',
+    'validfrom',
+    'dateissued',
+    'issuedate',
+    'issue',
+    'date',
+  ],
+};
+
+const VALID_BS_STAGES = new Set(['BS1', 'BS2', 'BS3', 'BS4', 'BS6']);
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  await dbConnect();
+  const conn = await dbConnect();
 
   try {
     const formData = await request.formData();
@@ -67,15 +84,21 @@ export async function POST(request: NextRequest) {
 
     const buffer = await file.arrayBuffer();
 
-    // Read with cellDates for proper Excel date handling
-    const workbook = read(buffer, { type: 'array', cellDates: true });
+    // Read with cellDates & dense mode for high performance
+    const workbook = read(buffer, { type: 'array', cellDates: true, dense: true });
     const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
+    if (!sheetName) {
+      return NextResponse.json({
+        imported: 0,
+        skipped: 0,
+        skippedDetails: [{ row: 0, reason: 'Excel workbook contains no sheets.' }],
+      });
+    }
 
-    // Step 1: Read as raw 2D array to detect headers
+    const sheet = workbook.Sheets[sheetName];
     const rawRows: any[][] = utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false });
 
-    if (rawRows.length === 0) {
+    if (!rawRows || rawRows.length === 0) {
       return NextResponse.json({
         imported: 0,
         skipped: 0,
@@ -83,96 +106,50 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 2: Auto-detect which row is the header
+    // Detect header row
     const headerRowIdx = findHeaderRowIndex(rawRows);
-    const headerRow = rawRows[headerRowIdx].map((h: any) =>
-      String(h ?? '').trim().replace(/\n/g, ' ').replace(/\s+/g, ' ')
-    );
+    const headerRow = rawRows[headerRowIdx] || [];
 
-    // DEBUG: Log what was detected so we can see in dev server console
-    console.log('[IMPORT] Total raw rows:', rawRows.length);
-    console.log('[IMPORT] Header row index:', headerRowIdx);
-    console.log('[IMPORT] Detected headers:', JSON.stringify(headerRow));
-    if (rawRows[headerRowIdx + 1]) {
-      console.log('[IMPORT] First data row:', JSON.stringify(rawRows[headerRowIdx + 1]));
-    }
+    // Pre-map column indices once
+    const colMap: Record<string, number> = {
+      vehicleNo: -1,
+      vehicleClass: -1,
+      bsStage: -1,
+      fuel: -1,
+      customerName: -1,
+      customerPhone: -1,
+      agent: -1,
+      issuedDate: -1,
+    };
 
-    // Step 3: Build rows as objects from detected header
-    const dataRows: Record<string, any>[] = [];
-    for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
-      const rawRow = rawRows[i];
-      if (!rawRow || rawRow.length === 0) continue;
-      // Skip row if all cells are empty
-      if (rawRow.every((c: any) => String(c ?? '').trim() === '')) continue;
-      const rowObj: Record<string, any> = {};
-      headerRow.forEach((colName, colIdx) => {
-        if (colName) rowObj[colName] = rawRow[colIdx] ?? '';
-      });
-      dataRows.push(rowObj);
-    }
-
-    console.log('[IMPORT] Data rows found:', dataRows.length);
-    if (dataRows.length > 0) {
-      console.log('[IMPORT] First data row parsed:', JSON.stringify(dataRows[0]));
-    }
-
-    if (dataRows.length === 0) {
-      return NextResponse.json({
-        imported: 0,
-        skipped: 0,
-        skippedDetails: [{ row: 0, reason: `No data rows found. Headers detected: [${headerRow.filter(Boolean).join(', ')}]` }],
-      });
-    }
+    headerRow.forEach((h: any, colIdx: number) => {
+      const clean = normKey(h);
+      if (!clean) return;
+      for (const [field, aliases] of Object.entries(COLUMN_PATTERNS)) {
+        if (colMap[field] === -1 && aliases.some((a) => clean.includes(a))) {
+          colMap[field] = colIdx;
+          break;
+        }
+      }
+    });
 
     const validRecords: any[] = [];
     const skipped: Array<{ row: number; reason: string }> = [];
-    const VALID_BS_STAGES = ['BS1', 'BS2', 'BS3', 'BS4', 'BS6'];
+    const now = nowIST();
 
-    for (let i = 0; i < dataRows.length; i++) {
-      const row = dataRows[i];
-      const rowNum = headerRowIdx + i + 2; // real Excel row number
+    // Single-pass direct array iteration
+    for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      if (!row || row.length === 0) continue;
+      // Skip if entire row is empty
+      if (row.every((c: any) => c === '' || c === null || c === undefined)) continue;
 
-      // Extract fields
-      const vehicleNoRaw = getField(row,
-        'Vehicle No', 'VehicleNo', 'Veh No', 'Vehicle Number', 'Reg No', 'Registration No', 'vehicle no'
-      );
-      const vehicleNo = vehicleNoRaw
-        ? String(vehicleNoRaw).replace(/[\s\-_.]/g, '').toUpperCase()
-        : '';
+      const rowNum = i + 1; // Real 1-indexed Excel row number
 
-      const vehicleClass = String(
-        getField(row, 'Class', 'Vehicle Class', 'VehicleClass', 'Veh Class') ?? 'CAR'
-      ).trim().toUpperCase() || 'CAR';
+      // 1. Vehicle No
+      const vehicleNoRaw = colMap.vehicleNo !== -1 ? row[colMap.vehicleNo] : '';
+      const vehicleNo = vehicleNoRaw ? String(vehicleNoRaw).replace(/[\s\-_.]/g, '').toUpperCase() : '';
 
-      const bsStageRaw = getField(row,
-        'BS Stage', 'BSStage', 'BS', 'Bs Stage', 'bs stage', 'bsstage', 'BS_Stage'
-      );
-      const bsStage = bsStageRaw
-        ? String(bsStageRaw).trim().toUpperCase().replace(/\s+/g, '')
-        : '';
-
-      const rawFuel = getField(row, 'Fuel', 'FuelType', 'Fuel Type', 'fuel');
-
-      const customerName = String(
-        getField(row, 'Customer Name', 'CustomerName', 'Name', 'Customer r Name') ?? '—'
-      ).trim() || '—';
-
-      const customerPhoneRaw = getField(row,
-        'Customer Phone', 'CustomerPhone', 'Phone', 'Mobile', 'Mobile No', 'Phone No',
-        'Customer\r\nPhone', 'Customer\nPhone', 'Custome r Phone'
-      );
-      const customerPhone = customerPhoneRaw
-        ? String(customerPhoneRaw).replace(/\D/g, '')
-        : '';
-
-      const agentRaw = getField(row, 'Agent', 'agent', 'Agent Name');
-      const agent = agentRaw ? String(agentRaw).trim() : null;
-
-      const issuedDateRaw = getField(row,
-        'Issued Date', 'IssuedDate', 'Date', 'Issue Date', 'IssueDate', 'Issued\nDate', 'issued date'
-      );
-
-      // ── Validations ──
       if (!vehicleNo) {
         skipped.push({ row: rowNum, reason: 'Missing Vehicle No' });
         continue;
@@ -181,24 +158,34 @@ export async function POST(request: NextRequest) {
         skipped.push({ row: rowNum, reason: `Invalid vehicle number: "${vehicleNo}"` });
         continue;
       }
-      if (!bsStage || !VALID_BS_STAGES.includes(bsStage)) {
-        skipped.push({ row: rowNum, reason: `Invalid BS Stage: "${bsStage}" — must be BS1/BS2/BS3/BS4/BS6` });
+
+      // 2. BS Stage
+      const bsStageRaw = colMap.bsStage !== -1 ? row[colMap.bsStage] : '';
+      const bsStage = bsStageRaw ? String(bsStageRaw).trim().toUpperCase().replace(/\s+/g, '') : '';
+      if (!bsStage || !VALID_BS_STAGES.has(bsStage)) {
+        skipped.push({ row: rowNum, reason: `Invalid BS Stage: "${bsStageRaw}" — must be BS1/BS2/BS3/BS4/BS6` });
         continue;
       }
 
+      // 3. Fuel
+      const rawFuel = colMap.fuel !== -1 ? row[colMap.fuel] : '';
       let fuel = 'Petrol';
       if (rawFuel) {
         const fUpper = String(rawFuel).toUpperCase().trim();
         if (fUpper === 'D' || fUpper.startsWith('DIESEL')) fuel = 'Diesel';
-        else if (fUpper === 'G' || fUpper === 'CNG' || fUpper.startsWith('GAS') || fUpper.startsWith('CNG') || fUpper.startsWith('LPG')) fuel = 'Gas';
-        else fuel = 'Petrol'; // P or Petrol → Petrol
+        else if (fUpper === 'G' || fUpper.startsWith('CNG') || fUpper.startsWith('GAS') || fUpper.startsWith('LPG')) fuel = 'Gas';
       }
 
-      if (!customerPhone || !/^\d{10}$/.test(customerPhone)) {
+      // 4. Customer Phone
+      const customerPhoneRaw = colMap.customerPhone !== -1 ? row[colMap.customerPhone] : '';
+      const customerPhone = customerPhoneRaw ? String(customerPhoneRaw).replace(/\D/g, '') : '';
+      if (!customerPhone || customerPhone.length !== 10) {
         skipped.push({ row: rowNum, reason: `Invalid phone: "${customerPhoneRaw}" — must be 10 digits` });
         continue;
       }
 
+      // 5. Issued Date
+      const issuedDateRaw = colMap.issuedDate !== -1 ? row[colMap.issuedDate] : '';
       if (issuedDateRaw === undefined || issuedDateRaw === null || String(issuedDateRaw).trim() === '') {
         skipped.push({ row: rowNum, reason: 'Missing Issued Date' });
         continue;
@@ -210,8 +197,18 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // 6. Other optional fields
+      const vehicleClassRaw = colMap.vehicleClass !== -1 ? row[colMap.vehicleClass] : '';
+      const vehicleClass = vehicleClassRaw ? String(vehicleClassRaw).trim().toUpperCase() || 'CAR' : 'CAR';
+
+      const customerNameRaw = colMap.customerName !== -1 ? row[colMap.customerName] : '';
+      const customerName = customerNameRaw ? String(customerNameRaw).trim() || '—' : '—';
+
+      const agentRaw = colMap.agent !== -1 ? row[colMap.agent] : '';
+      const agent = agentRaw ? String(agentRaw).trim() : null;
+
       const validTill = computeValidTill(issuedAt, bsStage);
-      const now = nowIST();
+      const isExpired = validTill.getTime() < now.getTime();
 
       validRecords.push({
         vehicleNo,
@@ -223,39 +220,57 @@ export async function POST(request: NextRequest) {
         agent: agent || null,
         issuedAt,
         validTill,
-        status: validTill < now ? 'expired' : 'active',
+        status: isExpired ? 'expired' : 'active',
         source: 'excel_import',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
     }
 
-    console.log('[IMPORT] Valid records:', validRecords.length, '| Skipped:', skipped.length);
-    if (skipped.length > 0) {
-      console.log('[IMPORT] Skip reasons:', JSON.stringify(skipped));
-    }
-
     let importedCount = 0;
+
     if (validRecords.length > 0) {
-      try {
-        const result = await PucRecord.insertMany(validRecords, { ordered: false });
-        importedCount = result.length;
-        console.log('[IMPORT] Successfully inserted:', importedCount);
-      } catch (err: any) {
-        console.error('[IMPORT] insertMany error:', err?.message || err);
-        if (err?.insertedDocs?.length) {
-          importedCount = err.insertedDocs.length;
-        } else if (err?.result?.nInserted) {
-          importedCount = err.result.nInserted;
-        } else {
-          // Count validRecords as imported (in-memory fallback)
-          importedCount = validRecords.length;
+      if (conn) {
+        try {
+          // Native high-speed collection batch insert in chunks of 2,500
+          const BATCH_SIZE = 2500;
+          for (let b = 0; b < validRecords.length; b += BATCH_SIZE) {
+            const chunk = validRecords.slice(b, b + BATCH_SIZE);
+            const result = await PucRecord.collection.insertMany(chunk, { ordered: false });
+            importedCount += result.insertedCount || chunk.length;
+          }
+        } catch (err: any) {
+          console.error('[IMPORT] MongoDB insert error:', err?.message || err);
+          if (err?.insertedCount !== undefined) {
+            importedCount = err.insertedCount;
+          } else if (err?.result?.nInserted !== undefined) {
+            importedCount = err.result.nInserted;
+          } else {
+            importedCount = validRecords.length;
+          }
         }
+      } else {
+        importedCount = validRecords.length;
+      }
+
+      // Always maintain fallback in-memory records
+      if (!global.__inMemoryPucRecords) {
+        global.__inMemoryPucRecords = [];
+      }
+      const memDocs = validRecords.map((r, idx) => ({
+        ...r,
+        _id: `imp_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+      }));
+      global.__inMemoryPucRecords = [...memDocs, ...global.__inMemoryPucRecords];
+      if (global.__inMemoryPucRecords.length > 50000) {
+        global.__inMemoryPucRecords = global.__inMemoryPucRecords.slice(0, 50000);
       }
     }
 
     return NextResponse.json({
       imported: importedCount,
       skipped: skipped.length,
-      skippedDetails: skipped,
+      skippedDetails: skipped.slice(0, 100),
     });
   } catch (err) {
     console.error('Import error:', err);
