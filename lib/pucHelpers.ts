@@ -96,14 +96,27 @@ export function validateVehicleNo(vehicleNo: string): boolean {
   return VEHICLE_NO_REGEX.test(sanitizeVehicleNo(vehicleNo));
 }
 
-/** Parse dd-mm-yyyy date string to a Date in IST */
+/** Parse dd-mm-yyyy or yyyy-mm-dd date string to a Date in IST */
 export function parseISTDate(dateStr: string): Date | null {
+  if (!dateStr) return null;
   const parts = dateStr.trim().split(/[-/]/);
   if (parts.length !== 3) return null;
-  const [day, month, year] = parts.map(Number);
+  
+  let year: number;
+  let month: number;
+  let day: number;
+
+  if (parts[0].length === 4) {
+    // yyyy-mm-dd
+    [year, month, day] = parts.map(Number);
+  } else {
+    // dd-mm-yyyy
+    [day, month, year] = parts.map(Number);
+  }
+
   if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const istDate = new Date(year, month - 1, day, 0, 0, 0);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900) return null;
+  const istDate = new Date(year, month - 1, day, 12, 0, 0); // use noon to prevent any midnight boundary issues
   return fromZonedTime(istDate, IST);
 }
 

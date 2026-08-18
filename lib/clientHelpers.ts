@@ -57,6 +57,26 @@ export function computeValidTillClient(issuedAt: Date, bsStage: string): Date {
   return d;
 }
 
+/** Check if a PUC record is expired */
+export function isRecordExpired(validTill: string | Date | undefined, status?: string): boolean {
+  if (status === 'expired') return true;
+  if (!validTill) return false;
+  const vt = typeof validTill === 'string' ? new Date(validTill).getTime() : validTill.getTime();
+  if (isNaN(vt)) return status === 'expired';
+  return vt < Date.now();
+}
+
+/** Get current date in YYYY-MM-DD format in IST timezone for date inputs */
+export function getTodayISTDateString(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  return parts; // en-CA gives YYYY-MM-DD
+}
+
 /** Indian vehicle number validation */
 export function validateVehicleNo(vehicleNo: string): boolean {
   const sanitized = sanitizeVehicleNo(vehicleNo);
