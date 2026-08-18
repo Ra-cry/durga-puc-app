@@ -1,32 +1,45 @@
-/** Format an ISO date string to IST dd-MM-yyyy using Intl (client-safe) */
-export function formatIST(dateStr: string | Date): string {
-  if (!dateStr) return '—';
-  const date = typeof dateStr === 'string' ? new Date(dateStr) : dateStr;
-  if (isNaN(date.getTime())) return '—';
-
-  return new Intl.DateTimeFormat('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }).format(date);
+/** Sanitize vehicle number (remove spaces & hyphens, uppercase) */
+export function sanitizeVehicleNo(vehicleNo: string): string {
+  return (vehicleNo || '').replace(/[\s-]/g, '').toUpperCase();
 }
 
-/** Format an ISO date string to IST dd-MM-yyyy HH:mm (client-safe) */
-export function formatISTDateTime(dateStr: string | Date): string {
+/** Sanitize phone number (keep digits only) */
+export function sanitizePhone(phone: string): string {
+  return (phone || '').replace(/\D/g, '');
+}
+
+/** Format an ISO date string to IST dd-MM-yyyy (Day) (client-safe) */
+export function formatIST(dateStr: string | Date, includeDay = false): string {
   if (!dateStr) return '—';
   const date = typeof dateStr === 'string' ? new Date(dateStr) : dateStr;
   if (isNaN(date.getTime())) return '—';
 
-  return new Intl.DateTimeFormat('en-IN', {
+  const datePart = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
   }).format(date);
+
+  if (includeDay) {
+    const dayPart = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'short',
+    }).format(date);
+    return `${datePart} (${dayPart})`;
+  }
+
+  return datePart;
+}
+
+/** Format an ISO date string to IST date and day */
+export function formatISTDateWithDay(dateStr: string | Date): string {
+  return formatIST(dateStr, true);
+}
+
+/** Format an ISO date string without time/seconds */
+export function formatISTDateTime(dateStr: string | Date): string {
+  return formatIST(dateStr, false);
 }
 
 /** Compute validity display string from bsStage */
@@ -46,5 +59,7 @@ export function computeValidTillClient(issuedAt: Date, bsStage: string): Date {
 
 /** Indian vehicle number validation */
 export function validateVehicleNo(vehicleNo: string): boolean {
-  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(vehicleNo.trim().toUpperCase());
+  const sanitized = sanitizeVehicleNo(vehicleNo);
+  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(sanitized);
 }
+
