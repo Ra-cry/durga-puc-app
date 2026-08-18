@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       const customerName = (row['Customer Name'] || row['CustomerName'])?.toString().trim();
       const customerPhone = (row['Customer Phone'] || row['CustomerPhone'] || row['Phone'])?.toString().trim().replace(/\D/g, '');
       const agent = (row['Agent'] || '')?.toString().trim() || null;
-      const issuedDateStr = (row['Issued Date'] || row['IssuedDate'] || row['Date'])?.toString().trim();
+      const issuedDateRaw = row['Issued Date'] || row['IssuedDate'] || row['Date'] || row['issuedDate'] || row['issued_date'];
 
       // Validations
       if (!vehicleNo) {
@@ -87,14 +87,14 @@ export async function POST(request: NextRequest) {
         skipped.push({ row: rowNum, reason: `Invalid phone: ${customerPhone}` });
         continue;
       }
-      if (!issuedDateStr) {
+      if (issuedDateRaw === undefined || issuedDateRaw === null || String(issuedDateRaw).trim() === '') {
         skipped.push({ row: rowNum, reason: 'Missing Issued Date' });
         continue;
       }
 
-      const issuedAt = parseISTDate(issuedDateStr);
+      const issuedAt = parseISTDate(issuedDateRaw);
       if (!issuedAt) {
-        skipped.push({ row: rowNum, reason: `Invalid date format: ${issuedDateStr} (use dd-mm-yyyy)` });
+        skipped.push({ row: rowNum, reason: `Invalid date format: ${issuedDateRaw} (use dd-mm-yyyy)` });
         continue;
       }
 
