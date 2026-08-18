@@ -63,21 +63,22 @@ export async function GET(request: NextRequest) {
       daysByYearMonth[key].add(day);
     }
 
-    // Default current year if no records yet
-    if (yearSet.size === 0) {
-      const currentY = new Date().getFullYear();
-      yearSet.add(currentY);
-      monthsByYear[currentY] = new Set([new Date().getMonth() + 1]);
-    }
+    // Combine discovered years with standard active range
+    const currentY = new Date().getFullYear();
+    yearSet.add(currentY);
+    yearSet.add(2024);
+    yearSet.add(2025);
+    yearSet.add(2026);
+    yearSet.add(2027);
 
     const years = Array.from(yearSet).sort((a, b) => b - a);
 
     if (!year) {
-      return NextResponse.json({ years, months: [], weeks: [], days: [] });
+      return NextResponse.json({ years, months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], weeks: [], days: [] });
     }
 
     const targetYear = parseInt(year);
-    const months = Array.from(monthsByYear[targetYear] || []).sort((a, b) => a - b);
+    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     if (!month) {
       return NextResponse.json({ years, months, weeks: [], days: [] });
@@ -90,6 +91,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ years, months, weeks, days });
   } catch {
-    return NextResponse.json({ years: [new Date().getFullYear()], months: [], weeks: [], days: [] });
+    return NextResponse.json({
+      years: [2027, 2026, 2025, 2024],
+      months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      weeks: [],
+      days: [],
+    });
   }
 }
+

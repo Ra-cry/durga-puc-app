@@ -44,15 +44,23 @@ export async function GET(request: NextRequest) {
 
     if (conn) {
       let query: Record<string, unknown> = {};
+      let sortQuery: Record<string, 1 | -1> = { issuedAt: -1 };
 
       if (type === 'today') {
         query = { issuedAt: { $gte: todayStart, $lte: todayEnd } };
       } else if (type === 'today_expired') {
         query = { validTill: { $gte: todayStart, $lte: todayEnd } };
+        sortQuery = { validTill: -1 };
       } else if (type === 'expired') {
+        sortQuery = { validTill: -1 };
         if (startDate && endDate) {
-          const maxEnd = new Date(Math.min(new Date(endDate).getTime(), now.getTime()));
-          query = { validTill: { $gte: new Date(startDate), $lte: maxEnd } };
+          query = {
+            validTill: {
+              $gte: new Date(startDate),
+              $lte: new Date(endDate),
+              $lt: now,
+            },
+          };
         } else {
           query = { validTill: { $lt: now } };
         }
@@ -67,6 +75,7 @@ export async function GET(request: NextRequest) {
 
         const orList: Record<string, unknown>[] = [
           { vehicleNo: { $regex: searchClean || searchTrim, $options: 'i' } },
+          { vehicleClass: { $regex: searchTrim, $options: 'i' } },
           { customerName: { $regex: searchTrim, $options: 'i' } },
           { agent: { $regex: searchTrim, $options: 'i' } },
           { fuelType: { $regex: searchTrim, $options: 'i' } },
@@ -79,7 +88,7 @@ export async function GET(request: NextRequest) {
       }
 
       const [records, total] = await Promise.all([
-        PucRecord.find(query).sort({ issuedAt: -1 }).skip(skip).limit(limit).lean(),
+        PucRecord.find(query).sort(sortQuery).skip(skip).limit(limit).lean(),
         PucRecord.countDocuments(query),
       ]);
 
@@ -90,6 +99,7 @@ export async function GET(request: NextRequest) {
           type === 'expired';
         return {
           ...r,
+          vehicleClass: r.vehicleClass || 'CAR',
           status: isExp ? 'expired' : 'active',
         };
       });
@@ -105,23 +115,25 @@ export async function GET(request: NextRequest) {
         const d = new Date(r.issuedAt);
         return d >= todayStart && d <= todayEnd;
       });
+      memoryList.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
     } else if (type === 'today_expired') {
       memoryList = memoryList.filter((r) => {
         const d = new Date(r.validTill);
         return d >= todayStart && d <= todayEnd;
       });
+      memoryList.sort((a, b) => new Date(b.validTill).getTime() - new Date(a.validTill).getTime());
     } else if (type === 'expired') {
       if (startDate && endDate) {
         const s = new Date(startDate);
         const e = new Date(endDate);
-        const maxE = new Date(Math.min(e.getTime(), now.getTime()));
         memoryList = memoryList.filter((r) => {
           const d = new Date(r.validTill);
-          return d >= s && d <= maxE;
+          return d >= s && d <= e && d < now;
         });
       } else {
         memoryList = memoryList.filter((r) => new Date(r.validTill) < now);
       }
+      memoryList.sort((a, b) => new Date(b.validTill).getTime() - new Date(a.validTill).getTime());
     } else if (type === 'old') {
       if (startDate && endDate) {
         const s = new Date(startDate);
@@ -131,12 +143,14 @@ export async function GET(request: NextRequest) {
           return d >= s && d <= e;
         });
       }
+      memoryList.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
     } else if (type === 'search' && search) {
       const term = search.trim().toLowerCase();
       const termClean = term.replace(/[\s-]/g, '');
       const termDigits = term.replace(/\D/g, '');
       memoryList = memoryList.filter((r) => {
         const vNo = (r.vehicleNo || '').toLowerCase();
+        const vClass = (r.vehicleClass || '').toLowerCase();
         const cName = (r.customerName || '').toLowerCase();
         const cPhone = (r.customerPhone || '').replace(/\D/g, '');
         const ag = (r.agent || '').toLowerCase();
@@ -145,6 +159,7 @@ export async function GET(request: NextRequest) {
         return (
           vNo.includes(term) ||
           vNo.replace(/[\s-]/g, '').includes(termClean) ||
+          vClass.includes(term) ||
           cName.includes(term) ||
           (termDigits && cPhone.includes(termDigits)) ||
           ag.includes(term) ||
@@ -152,9 +167,9 @@ export async function GET(request: NextRequest) {
           bs.includes(term)
         );
       });
+      memoryList.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
     }
 
-    memoryList.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
     const paginated = memoryList.slice(skip, skip + limit).map((r) => {
       const isExp =
         new Date(r.validTill).getTime() <= now.getTime() ||
@@ -162,6 +177,7 @@ export async function GET(request: NextRequest) {
         type === 'expired';
       return {
         ...r,
+        vehicleClass: r.vehicleClass || 'CAR',
         status: isExp ? 'expired' : 'active',
       };
     });
@@ -186,7 +202,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { vehicleNo, bsStage, fuelType, customerName, customerPhone, agent, issuedDate } = body;
+    const { vehicleNo, vehicleClass, bsStage, fuelType, customerName, customerPhone, agent, issuedDate } = body;
 
     // Validation
     if (!vehicleNo || !bsStage || !fuelType || !customerPhone) {
@@ -221,12 +237,14 @@ export async function POST(request: NextRequest) {
     const validTill = computeValidTill(issuedAt, bsStage);
     const now = nowIST();
     const status = validTill.getTime() < now.getTime() ? 'expired' : 'active';
+    const finalVehicleClass = (vehicleClass || 'CAR').trim().toUpperCase();
 
     const recordData = {
       _id: `mem_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       vehicleNo: normalizedVehicleNo,
+      vehicleClass: finalVehicleClass,
       bsStage,
-      fuelType,
+      fuelType: fuelType.trim(),
       customerName: customerName?.trim() || '—',
       customerPhone: cleanPhone,
       agent: agent?.trim() || null,
@@ -245,8 +263,9 @@ export async function POST(request: NextRequest) {
       try {
         const doc = await PucRecord.create({
           vehicleNo: normalizedVehicleNo,
+          vehicleClass: finalVehicleClass,
           bsStage,
-          fuelType,
+          fuelType: fuelType.trim(),
           customerName: customerName?.trim() || '—',
           customerPhone: cleanPhone,
           agent: agent?.trim() || null,

@@ -20,36 +20,39 @@ export async function GET(request: NextRequest) {
   try {
     const conn = await dbConnect();
     let records: any[] = [];
+    const now = new Date();
 
     if (conn) {
       let query: Record<string, unknown> = {};
+      let sortQuery: Record<string, 1 | -1> = { issuedAt: -1 };
+
       if (type === 'expired') {
+        sortQuery = { validTill: -1 };
         if (startDate && endDate) {
-          const maxEnd = new Date(Math.min(new Date(endDate).getTime(), Date.now()));
-          query = { validTill: { $gte: new Date(startDate), $lte: maxEnd } };
+          query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate), $lt: now } };
         } else {
-          query = { validTill: { $lt: new Date() } };
+          query = { validTill: { $lt: now } };
         }
       } else {
         if (startDate && endDate) {
           query = { issuedAt: { $gte: new Date(startDate), $lte: new Date(endDate) } };
         }
       }
-      records = await PucRecord.find(query).sort({ issuedAt: -1 }).lean();
+      records = await PucRecord.find(query).sort(sortQuery).lean();
     } else {
       const memoryList = global.__inMemoryPucRecords || [];
       if (type === 'expired') {
         if (startDate && endDate) {
           const s = new Date(startDate);
           const e = new Date(endDate);
-          const maxE = new Date(Math.min(e.getTime(), Date.now()));
           records = memoryList.filter((r) => {
             const d = new Date(r.validTill);
-            return d >= s && d <= maxE;
+            return d >= s && d <= e && d < now;
           });
         } else {
-          records = memoryList.filter((r) => new Date(r.validTill) < new Date());
+          records = memoryList.filter((r) => new Date(r.validTill) < now);
         }
+        records.sort((a, b) => new Date(b.validTill).getTime() - new Date(a.validTill).getTime());
       } else {
         if (startDate && endDate) {
           const s = new Date(startDate);
@@ -61,11 +64,13 @@ export async function GET(request: NextRequest) {
         } else {
           records = [...memoryList];
         }
+        records.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
       }
     }
 
     const sheetData = records.map((r) => ({
       'Vehicle No': r.vehicleNo,
+      Class: r.vehicleClass || 'CAR',
       'BS Stage': r.bsStage,
       Fuel: r.fuelType,
       'Customer Name': r.customerName,
@@ -73,7 +78,7 @@ export async function GET(request: NextRequest) {
       Agent: r.agent || '',
       'Issued Date': formatIST(new Date(r.issuedAt)),
       'Valid Till': formatIST(new Date(r.validTill)),
-      Status: new Date(r.validTill) < new Date() ? 'Expired' : 'Active',
+      Status: new Date(r.validTill) < now ? 'Expired' : 'Active',
     }));
 
     const worksheet = utils.json_to_sheet(sheetData);

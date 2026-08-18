@@ -52,13 +52,14 @@ export async function POST(request: NextRequest) {
       const row = rows[i];
       const rowNum = i + 2; // 1-indexed, row 1 is headers
 
-      const vehicleNo = row['Vehicle No']?.toString().trim().toUpperCase();
-      const bsStage = row['BS Stage']?.toString().trim().toUpperCase();
-      const fuel = row['Fuel']?.toString().trim();
-      const customerName = row['Customer Name']?.toString().trim();
-      const customerPhone = row['Customer Phone']?.toString().trim().replace(/\s/g, '');
-      const agent = row['Agent']?.toString().trim() || null;
-      const issuedDateStr = row['Issued Date']?.toString().trim();
+      const vehicleNo = (row['Vehicle No'] || row['VehicleNo'])?.toString().trim().toUpperCase();
+      const vehicleClass = (row['Class'] || row['Vehicle Class'] || row['VehicleClass'] || 'CAR').toString().trim().toUpperCase();
+      const bsStage = (row['BS Stage'] || row['BSStage'])?.toString().trim().toUpperCase();
+      const rawFuel = (row['Fuel'] || row['FuelType'] || row['Fuel Type'])?.toString().trim();
+      const customerName = (row['Customer Name'] || row['CustomerName'])?.toString().trim();
+      const customerPhone = (row['Customer Phone'] || row['CustomerPhone'] || row['Phone'])?.toString().trim().replace(/\D/g, '');
+      const agent = (row['Agent'] || '')?.toString().trim() || null;
+      const issuedDateStr = (row['Issued Date'] || row['IssuedDate'] || row['Date'])?.toString().trim();
 
       // Validations
       if (!vehicleNo) {
@@ -73,10 +74,15 @@ export async function POST(request: NextRequest) {
         skipped.push({ row: rowNum, reason: `Invalid BS Stage: ${bsStage}` });
         continue;
       }
-      if (!fuel || !VALID_FUELS.includes(fuel)) {
-        skipped.push({ row: rowNum, reason: `Invalid Fuel type: ${fuel}` });
-        continue;
+
+      let fuel = 'Petrol';
+      if (rawFuel) {
+        const fUpper = rawFuel.toUpperCase();
+        if (fUpper === 'D' || fUpper.startsWith('DIESEL')) fuel = 'Diesel';
+        else if (fUpper === 'G' || fUpper.startsWith('GAS') || fUpper.startsWith('CNG') || fUpper.startsWith('LPG')) fuel = 'Gas';
+        else fuel = 'Petrol';
       }
+
       if (!customerPhone || !/^\d{10}$/.test(customerPhone)) {
         skipped.push({ row: rowNum, reason: `Invalid phone: ${customerPhone}` });
         continue;
@@ -96,7 +102,9 @@ export async function POST(request: NextRequest) {
       const now = nowIST();
 
       validRecords.push({
+        _id: `mem_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
         vehicleNo,
+        vehicleClass: vehicleClass || 'CAR',
         bsStage,
         fuelType: fuel,
         customerName: customerName || '—',
@@ -106,13 +114,26 @@ export async function POST(request: NextRequest) {
         validTill,
         status: validTill < now ? 'expired' : 'active',
         source: 'excel_import',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
     }
 
     let importedCount = 0;
     if (validRecords.length > 0) {
-      const result = await PucRecord.insertMany(validRecords, { ordered: false });
-      importedCount = result.length;
+      try {
+        const result = await PucRecord.insertMany(validRecords, { ordered: false });
+        importedCount = result.length;
+      } catch (err: any) {
+        if (err?.insertedDocs?.length) {
+          importedCount = err.insertedDocs.length;
+        }
+      }
+
+      if (!global.__inMemoryPucRecords) {
+        global.__inMemoryPucRecords = [];
+      }
+      global.__inMemoryPucRecords.unshift(...validRecords);
     }
 
     return NextResponse.json({
