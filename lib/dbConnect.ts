@@ -19,22 +19,31 @@ if (!global.mongoose) {
 async function dbConnect() {
   const MONGODB_URI = process.env.MONGODB_URI;
 
-  if (!MONGODB_URI) {
-    console.warn('MONGODB_URI is not defined in environment variables');
+  if (!MONGODB_URI || MONGODB_URI.includes('your_user')) {
     return null;
   }
 
   if (cached.conn) return cached.conn;
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI, {
-      bufferCommands: false,
-      serverSelectionTimeoutMS: 5000,
-    });
+    cached.promise = mongoose
+      .connect(MONGODB_URI, {
+        bufferCommands: false,
+        serverSelectionTimeoutMS: 3000,
+      })
+      .catch((err) => {
+        cached.promise = null;
+        throw err;
+      });
   }
 
-  cached.conn = await cached.promise;
-  return cached.conn;
+  try {
+    cached.conn = await cached.promise;
+    return cached.conn;
+  } catch {
+    cached.promise = null;
+    return null;
+  }
 }
 
 export default dbConnect;
