@@ -227,7 +227,7 @@ export default function PucTable({
                     {r.customerName && r.customerName.trim() ? r.customerName : '—'}
                   </td>
                   <td className="font-mono text-xs whitespace-nowrap text-slate-200 tracking-wider">
-                    {r.customerPhone}
+                    {r.customerPhone && r.customerPhone.trim() && r.customerPhone !== '—' ? r.customerPhone : '—'}
                   </td>
                   <td style={{ color: '#64748b' }} className="truncate" title={r.agent || ''}>
                     {r.agent || '—'}

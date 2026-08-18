@@ -100,10 +100,8 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
     if (!form.fuelType) newErrors.fuelType = 'Fuel type is required';
 
     const cleanPhone = (form.customerPhone || '').replace(/\D/g, '');
-    if (!cleanPhone) {
-      newErrors.customerPhone = 'Phone number is required';
-    } else if (!/^\d{10}$/.test(cleanPhone)) {
-      newErrors.customerPhone = 'Phone must be exactly 10 digits';
+    if (cleanPhone && !/^\d{10}$/.test(cleanPhone)) {
+      newErrors.customerPhone = 'Phone must be 10 digits (or leave blank)';
     }
 
     return newErrors;
@@ -374,7 +372,10 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="form-label" htmlFor="puc-customerPhone">
-                Phone No <span style={{ color: '#ef4444' }}>*</span>
+                Phone No{' '}
+                <span className="normal-case font-normal" style={{ color: '#475569' }}>
+                  (optional)
+                </span>
               </label>
               <input
                 id="puc-customerPhone"

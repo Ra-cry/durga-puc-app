@@ -50,9 +50,9 @@ const PucRecordSchema = new Schema<IPucRecord>(
     },
     customerPhone: {
       type: String,
-      required: true,
+      required: false,
+      default: '—',
       trim: true,
-      match: [/^\d{10}$/, 'Phone number must be 10 digits'],
     },
     agent: {
       type: String,
@@ -89,6 +89,7 @@ PucRecordSchema.index({ vehicleClass: 1 });
 PucRecordSchema.index({ validTill: 1 });
 PucRecordSchema.index({ issuedAt: 1 });
 PucRecordSchema.index({ issuedAt: 1, validTill: 1 });
+PucRecordSchema.index({ vehicleNo: 1, issuedAt: 1, validTill: 1 });
 PucRecordSchema.index({ customerPhone: 1 });
 
 const PucRecord: Model<IPucRecord> =
