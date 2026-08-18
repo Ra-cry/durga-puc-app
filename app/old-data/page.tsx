@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import Header from '@/components/Header';
 import PucTable, { PucRecordRow } from '@/components/PucTable';
-import FilterBar from '@/components/FilterBar';
+import FilterBar, { FilterParams } from '@/components/FilterBar';
 
 export default function OldDataPage() {
   const [records, setRecords] = useState<PucRecordRow[]>([]);
@@ -11,9 +11,9 @@ export default function OldDataPage() {
   const [total, setTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [currentRange, setCurrentRange] = useState<{ startDate?: string; endDate?: string }>({});
+  const [, setCurrentRange] = useState<FilterParams>({});
 
-  const fetchRecords = useCallback(async (params: { startDate?: string; endDate?: string }) => {
+  const fetchRecords = useCallback(async (params: FilterParams) => {
     setLoading(true);
     setSearched(true);
     setCurrentRange(params);
@@ -22,6 +22,15 @@ export default function OldDataPage() {
       const urlParams = new URLSearchParams({ type: 'old', limit: '500' });
       if (params.startDate) urlParams.set('startDate', params.startDate);
       if (params.endDate) urlParams.set('endDate', params.endDate);
+      if (params.year) urlParams.set('year', params.year);
+      if (params.month) urlParams.set('month', params.month);
+      if (params.week) urlParams.set('week', params.week);
+      if (params.day) urlParams.set('day', params.day);
+
+      if (typeof window !== 'undefined') {
+        const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+        window.history.replaceState(null, '', newUrl);
+      }
 
       const res = await fetch(`/api/puc?${urlParams}`);
       const data = await res.json();
@@ -34,12 +43,16 @@ export default function OldDataPage() {
     }
   }, []);
 
-  const handleExport = useCallback(async (params: { startDate?: string; endDate?: string }) => {
+  const handleExport = useCallback(async (params: FilterParams) => {
     setExporting(true);
     try {
       const urlParams = new URLSearchParams({ type: 'old' });
       if (params.startDate) urlParams.set('startDate', params.startDate);
       if (params.endDate) urlParams.set('endDate', params.endDate);
+      if (params.year) urlParams.set('year', params.year);
+      if (params.month) urlParams.set('month', params.month);
+      if (params.week) urlParams.set('week', params.week);
+      if (params.day) urlParams.set('day', params.day);
 
       const res = await fetch(`/api/puc/export?${urlParams}`);
       if (!res.ok) throw new Error('Export failed');
@@ -68,7 +81,7 @@ export default function OldDataPage() {
           <div>
             <h1 className="text-xl font-bold text-white">Old PUC Data</h1>
             <p className="text-sm mt-0.5" style={{ color: '#64748b' }}>
-              Browse and export historical PUC records by year, month, or week
+              Browse and export historical PUC records by year, month, week, or day
             </p>
           </div>
           {searched && (
@@ -112,7 +125,7 @@ export default function OldDataPage() {
             records={searched ? records : []}
             loading={loading}
             emptyMessage={
-              searched ? 'No records found for the selected period' : 'Select a year and click Search to view records'
+              searched ? 'No records found for the selected period' : 'Select a year/month/week/day and click Search to view records'
             }
             showStatus
           />
