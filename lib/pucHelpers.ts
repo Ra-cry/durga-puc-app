@@ -86,9 +86,14 @@ export function formatISTDateTime(date: Date): string {
 /** Indian vehicle number validation regex */
 export const VEHICLE_NO_REGEX = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/;
 
+/** Sanitize vehicle number */
+export function sanitizeVehicleNo(vehicleNo: string): string {
+  return (vehicleNo || '').replace(/[\s-]/g, '').toUpperCase();
+}
+
 /** Validate a vehicle number */
 export function validateVehicleNo(vehicleNo: string): boolean {
-  return VEHICLE_NO_REGEX.test(vehicleNo.trim().toUpperCase());
+  return VEHICLE_NO_REGEX.test(sanitizeVehicleNo(vehicleNo));
 }
 
 /** Parse dd-mm-yyyy date string to a Date in IST */
