@@ -36,7 +36,8 @@ const PucRecordSchema = new Schema<IPucRecord>(
     },
     customerName: {
       type: String,
-      required: true,
+      required: false,
+      default: '—',
       trim: true,
     },
     customerPhone: {

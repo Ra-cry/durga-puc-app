@@ -1,25 +1,11 @@
 'use client';
-
-import { useEffect, useState } from 'react';
+ 
 import { signOut } from 'next-auth/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export default function Header() {
-  const [dateStr, setDateStr] = useState('');
   const pathname = usePathname();
-
-  useEffect(() => {
-    const now = new Date();
-    const formatted = new Intl.DateTimeFormat('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    }).format(now);
-    setDateStr(formatted);
-  }, []);
 
   const navLinks = [
     { href: '/dashboard', label: 'Dashboard' },
@@ -59,19 +45,6 @@ export default function Header() {
                 Eluru — PUC Management System
               </p>
             </div>
-          </div>
-
-          {/* IST Date & Day */}
-          <div className="hidden sm:flex flex-col items-end">
-            <span
-              className="text-sm font-bold"
-              style={{ color: '#38bdf8' }}
-            >
-              {dateStr || 'Loading...'}
-            </span>
-            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
-              IST Date & Day
-            </span>
           </div>
 
           {/* Sign out */}

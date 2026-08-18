@@ -122,8 +122,8 @@ export default function PucTable({
                     </span>
                   </td>
                   <td style={{ color: '#94a3b8' }}>{r.fuelType}</td>
-                  <td className="truncate text-slate-200" title={r.customerName}>
-                    {r.customerName}
+                  <td className="truncate text-slate-200" title={r.customerName || '—'}>
+                    {r.customerName && r.customerName.trim() ? r.customerName : '—'}
                   </td>
                   <td style={{ color: '#94a3b8' }} className="font-mono text-xs truncate">
                     {r.customerPhone}

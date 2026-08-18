@@ -76,7 +76,6 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
 
     if (!form.bsStage) newErrors.bsStage = 'BS Stage is required';
     if (!form.fuelType) newErrors.fuelType = 'Fuel type is required';
-    if (!form.customerName.trim()) newErrors.customerName = 'Customer name is required';
 
     const cleanPhone = (form.customerPhone || '').replace(/\D/g, '');
     if (!cleanPhone) {
@@ -107,7 +106,7 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
           vehicleNo: form.vehicleNo.replace(/[\s-]/g, '').toUpperCase(),
           bsStage: form.bsStage,
           fuelType: form.fuelType,
-          customerName: form.customerName.trim(),
+          customerName: form.customerName.trim() || '—',
           customerPhone: form.customerPhone.replace(/\D/g, ''),
           agent: form.agent.trim() || null,
           issuedDate: form.issuedDate,
@@ -286,23 +285,20 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
           {/* Customer Name */}
           <div>
             <label className="form-label" htmlFor="puc-customerName">
-              Customer Name <span style={{ color: '#ef4444' }}>*</span>
+              Customer Name{' '}
+              <span className="normal-case font-normal" style={{ color: '#475569' }}>
+                (optional)
+              </span>
             </label>
             <input
               id="puc-customerName"
               name="customerName"
               type="text"
               className="input-field"
-              placeholder="Full name"
+              placeholder="Full name (optional)"
               value={form.customerName}
               onChange={handleChange}
-              style={errors.customerName ? { borderColor: '#ef4444' } : {}}
             />
-            {errors.customerName && (
-              <p className="text-xs mt-1" style={{ color: '#f87171' }}>
-                {errors.customerName}
-              </p>
-            )}
           </div>
 
           {/* Phone + Agent — two columns */}

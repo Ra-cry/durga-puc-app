@@ -75,14 +75,14 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       try {
         const res = await fetch(`/api/puc/meta?type=${type}&year=${selectedYear}`);
         const data = await res.json();
-        setMonths(data.months || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        setMonths(data.months || []);
         setSelectedMonth('');
         setSelectedWeek('');
         setSelectedDay('');
         setWeeks([]);
         setDays([]);
       } catch {
-        setMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        setMonths([]);
       }
     };
     fetchMonths();
@@ -103,21 +103,13 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           `/api/puc/meta?type=${type}&year=${selectedYear}&month=${selectedMonth}`
         );
         const data = await res.json();
-        setWeeks(data.weeks || [1, 2, 3, 4, 5]);
-
-        const y = parseInt(selectedYear);
-        const m = parseInt(selectedMonth);
-        const numDays = new Date(y, m, 0).getDate();
-        const availableDays =
-          data.days && data.days.length > 0
-            ? data.days
-            : Array.from({ length: numDays }, (_, i) => i + 1);
-        setDays(availableDays);
+        setWeeks(data.weeks || []);
+        setDays(data.days || []);
         setSelectedWeek('');
         setSelectedDay('');
       } catch {
-        setWeeks([1, 2, 3, 4, 5]);
-        setDays(Array.from({ length: 31 }, (_, i) => i + 1));
+        setWeeks([]);
+        setDays([]);
       }
     };
     fetchWeeksAndDays();
