@@ -219,7 +219,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       style={{ background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(51,65,85,0.4)' }}
     >
       {/* Year */}
-      <div style={{ minWidth: 120 }}>
+      <div className="flex-1 min-w-[120px]">
         <label className="form-label" htmlFor="filter-year">
           Year
         </label>
@@ -245,7 +245,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       </div>
 
       {/* Month */}
-      <div style={{ minWidth: 140 }}>
+      <div className="flex-1 min-w-[140px]">
         <label className="form-label" htmlFor="filter-month">
           Month
         </label>
@@ -270,7 +270,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       </div>
 
       {/* Week */}
-      <div style={{ minWidth: 150 }}>
+      <div className="flex-1 min-w-[140px]">
         <label className="form-label" htmlFor="filter-week">
           Week
         </label>
@@ -294,9 +294,9 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       </div>
 
       {/* Day */}
-      <div style={{ minWidth: 110 }}>
+      <div className="flex-1 min-w-[110px]">
         <label className="form-label" htmlFor="filter-day">
-          Day
+          Day / Date
         </label>
         <select
           id="filter-day"
@@ -311,14 +311,14 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           <option value="">All Days</option>
           {days.map((d) => (
             <option key={d} value={d}>
-              Day {d}
+              {d}
             </option>
           ))}
         </select>
       </div>
 
       {/* Buttons */}
-      <div className="flex gap-2 pb-0.5">
+      <div className="flex flex-wrap gap-2 pb-0.5 items-center">
         <button id="filter-search" className="btn-primary" onClick={handleSearch}>
           <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
             <path

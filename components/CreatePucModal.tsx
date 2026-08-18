@@ -6,17 +6,19 @@ import {
   computeValidTillClient,
   formatIST,
   getValidityLabel,
+  getTodayISTDateString,
 } from '@/lib/clientHelpers';
 
 interface CreatePucModalProps {
   onClose: () => void;
   onSuccess: () => void;
+  defaultDate?: string;
 }
 
 const BS_STAGES = ['BS1', 'BS2', 'BS3', 'BS4', 'BS6'] as const;
 const FUEL_TYPES = ['Diesel', 'Petrol', 'Gas'] as const;
 
-export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalProps) {
+export default function CreatePucModal({ onClose, onSuccess, defaultDate }: CreatePucModalProps) {
   const [form, setForm] = useState({
     vehicleNo: '',
     bsStage: '',
@@ -24,24 +26,25 @@ export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalPro
     customerName: '',
     customerPhone: '',
     agent: '',
+    issuedDate: defaultDate || getTodayISTDateString(),
   });
   const [validityPreview, setValidityPreview] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState('');
 
-  // Update validity preview whenever bsStage changes
+  // Update validity preview whenever bsStage or issuedDate changes
   useEffect(() => {
     if (form.bsStage) {
-      const now = new Date();
-      const till = computeValidTillClient(now, form.bsStage);
+      const baseDate = form.issuedDate ? new Date(form.issuedDate + 'T12:00:00') : new Date();
+      const till = computeValidTillClient(baseDate, form.bsStage);
       setValidityPreview(
         `Valid till: ${formatIST(till)} (${getValidityLabel(form.bsStage)})`
       );
     } else {
       setValidityPreview('');
     }
-  }, [form.bsStage]);
+  }, [form.bsStage, form.issuedDate]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -107,6 +110,7 @@ export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalPro
           customerName: form.customerName.trim(),
           customerPhone: form.customerPhone.replace(/\D/g, ''),
           agent: form.agent.trim() || null,
+          issuedDate: form.issuedDate,
         }),
       });
 
@@ -162,28 +166,45 @@ export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalPro
         </div>
 
         <form id="create-puc-form" onSubmit={handleSubmit} className="space-y-4">
-          {/* Vehicle No */}
-          <div>
-            <label className="form-label" htmlFor="puc-vehicleNo">
-              Vehicle Number <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <input
-              id="puc-vehicleNo"
-              name="vehicleNo"
-              type="text"
-              className="input-field"
-              placeholder="e.g. AP03AB1234"
-              value={form.vehicleNo}
-              onChange={handleChange}
-              maxLength={12}
-              autoFocus
-              style={errors.vehicleNo ? { borderColor: '#ef4444' } : {}}
-            />
-            {errors.vehicleNo && (
-              <p className="text-xs mt-1" style={{ color: '#f87171' }}>
-                {errors.vehicleNo}
-              </p>
-            )}
+          {/* Issue Date & Vehicle No in 2 columns */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="puc-issuedDate">
+                Issue Date (Calendar) <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                id="puc-issuedDate"
+                name="issuedDate"
+                type="date"
+                className="input-field"
+                value={form.issuedDate}
+                onChange={handleChange}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="form-label" htmlFor="puc-vehicleNo">
+                Vehicle Number <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                id="puc-vehicleNo"
+                name="vehicleNo"
+                type="text"
+                className="input-field font-mono font-bold uppercase"
+                placeholder="e.g. AP03AB1234"
+                value={form.vehicleNo}
+                onChange={handleChange}
+                maxLength={12}
+                autoFocus
+                style={errors.vehicleNo ? { borderColor: '#ef4444' } : {}}
+              />
+              {errors.vehicleNo && (
+                <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                  {errors.vehicleNo}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* BS Stage + Fuel — two columns */}
