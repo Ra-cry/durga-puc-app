@@ -67,7 +67,7 @@ export default function DashboardPage() {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  // Search
+  // Search across entire database
   const handleSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
       setSearchResults(null);
@@ -75,7 +75,7 @@ export default function DashboardPage() {
     }
     setLoadingSearch(true);
     try {
-      const res = await fetch(`/api/puc?type=search&search=${encodeURIComponent(q)}&limit=100`);
+      const res = await fetch(`/api/puc?type=search&search=${encodeURIComponent(q)}&limit=1000`);
       const data = await res.json();
       setSearchResults(data.records || []);
     } catch {
@@ -99,11 +99,17 @@ export default function DashboardPage() {
     setShowCreateModal(false);
     fetchToday();
     fetchExpiredToday();
+    if (searchQuery.trim()) {
+      handleSearch(searchQuery);
+    }
   };
 
   const handleImportSuccess = () => {
     fetchToday();
     fetchExpiredToday();
+    if (searchQuery.trim()) {
+      handleSearch(searchQuery);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -132,7 +138,7 @@ export default function DashboardPage() {
         {/* Top controls bar */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           {/* Search */}
-          <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 max-w-md">
+          <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 max-w-lg">
             <div className="relative flex-1">
               <svg
                 viewBox="0 0 20 20"
@@ -150,9 +156,9 @@ export default function DashboardPage() {
                 id="dashboard-search"
                 type="text"
                 className="input-field"
-                placeholder="Search vehicle number..."
+                placeholder="Search vehicle no, name, phone, agent..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 style={{ paddingLeft: '2.25rem' }}
               />
             </div>
