@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { formatIST, isRecordExpired } from '@/lib/clientHelpers';
+import { formatIST, isRecordExpired, getFuelShortCode, getFuelFullName } from '@/lib/clientHelpers';
 
 export interface PucRecordRow {
   _id: string;
   vehicleNo: string;
+  vehicleClass?: string;
   bsStage: string;
   fuelType: string;
   customerName: string;
@@ -24,6 +25,100 @@ interface PucTableProps {
   showStatus?: boolean;
   showIssuedAt?: boolean;
   onDelete?: (id: string, vehicleNo: string) => Promise<void> | void;
+}
+
+function FuelBadge({ fuel }: { fuel: string }) {
+  const code = getFuelShortCode(fuel);
+  const fullName = getFuelFullName(fuel);
+
+  if (code === 'P') {
+    return (
+      <span
+        title={`Fuel: ${fullName} (P)`}
+        className="inline-flex items-center justify-center font-bold rounded px-1.5 py-0.5 text-[11px]"
+        style={{
+          background: 'rgba(16, 185, 129, 0.12)',
+          color: '#34d399',
+          border: '1px solid rgba(16, 185, 129, 0.25)',
+          minWidth: '22px',
+        }}
+      >
+        P
+      </span>
+    );
+  }
+
+  if (code === 'D') {
+    return (
+      <span
+        title={`Fuel: ${fullName} (D)`}
+        className="inline-flex items-center justify-center font-bold rounded px-1.5 py-0.5 text-[11px]"
+        style={{
+          background: 'rgba(245, 158, 11, 0.12)',
+          color: '#fbbf24',
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+          minWidth: '22px',
+        }}
+      >
+        D
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={`Fuel: ${fullName} (G)`}
+      className="inline-flex items-center justify-center font-bold rounded px-1.5 py-0.5 text-[11px]"
+      style={{
+        background: 'rgba(168, 85, 247, 0.12)',
+        color: '#c084fc',
+        border: '1px solid rgba(168, 85, 247, 0.25)',
+        minWidth: '22px',
+      }}
+    >
+      G
+    </span>
+  );
+}
+
+function ClassBadge({ vClass }: { vClass?: string }) {
+  const cls = (vClass || 'CAR').toUpperCase();
+
+  let colorStyle = {
+    background: 'rgba(59, 130, 246, 0.1)',
+    color: '#60a5fa',
+    border: '1px solid rgba(59, 130, 246, 0.2)',
+  };
+
+  if (cls === 'MC') {
+    colorStyle = {
+      background: 'rgba(99, 102, 241, 0.1)',
+      color: '#818cf8',
+      border: '1px solid rgba(99, 102, 241, 0.2)',
+    };
+  } else if (cls === 'LORRY') {
+    colorStyle = {
+      background: 'rgba(249, 115, 22, 0.1)',
+      color: '#fb923c',
+      border: '1px solid rgba(249, 115, 22, 0.2)',
+    };
+  } else if (cls === 'MMV') {
+    colorStyle = {
+      background: 'rgba(20, 184, 166, 0.1)',
+      color: '#2dd4bf',
+      border: '1px solid rgba(20, 184, 166, 0.2)',
+    };
+  }
+
+  return (
+    <span
+      title={`Vehicle Class: ${cls}`}
+      className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider"
+      style={colorStyle}
+    >
+      {cls}
+    </span>
+  );
 }
 
 export default function PucTable({
@@ -83,21 +178,22 @@ export default function PucTable({
 
   return (
     <>
-      <div className="w-full overflow-hidden">
-        <table className="data-table w-full table-fixed">
+      <div className="w-full overflow-x-auto">
+        <table className="data-table w-full table-fixed min-w-full">
           <thead>
             <tr>
               <th style={{ width: '4%' }}>#</th>
-              <th style={{ width: showIssuedAt ? '14%' : '17%' }}>Vehicle No</th>
-              <th style={{ width: '9%' }}>BS</th>
-              <th style={{ width: '9%' }}>Fuel</th>
-              <th style={{ width: showIssuedAt ? '17%' : '22%' }}>Customer</th>
+              <th style={{ width: showIssuedAt ? '14%' : '16%' }}>Vehicle No</th>
+              <th style={{ width: '8%' }}>Class</th>
+              <th style={{ width: '8%' }}>BS</th>
+              <th style={{ width: '7%' }} title="Fuel: Petrol (P), Diesel (D), Gas (G)">Fuel</th>
+              <th style={{ width: showIssuedAt ? '15%' : '18%' }}>Customer</th>
               <th style={{ width: '13%' }}>Phone</th>
-              <th style={{ width: '9%' }}>Agent</th>
-              {showIssuedAt && <th style={{ width: '12%' }}>Issued On</th>}
-              <th style={{ width: showIssuedAt ? '12%' : '15%' }}>Valid Till</th>
-              {showStatus && <th style={{ width: '10%' }}>Status</th>}
-              {onDelete && <th style={{ width: '7%', textAlign: 'center' }}>Action</th>}
+              <th style={{ width: '8%' }}>Agent</th>
+              {showIssuedAt && <th style={{ width: '11%' }}>Issued On</th>}
+              <th style={{ width: showIssuedAt ? '11%' : '14%' }}>Valid Till</th>
+              {showStatus && <th style={{ width: '9%' }}>Status</th>}
+              {onDelete && <th style={{ width: '6%', textAlign: 'center' }}>Action</th>}
             </tr>
           </thead>
           <tbody>
@@ -108,6 +204,9 @@ export default function PucTable({
                   <td style={{ color: '#475569', fontSize: '0.75rem' }}>{i + 1}</td>
                   <td className="font-mono font-bold text-white tracking-wide truncate" title={r.vehicleNo}>
                     {r.vehicleNo}
+                  </td>
+                  <td>
+                    <ClassBadge vClass={r.vehicleClass} />
                   </td>
                   <td>
                     <span
@@ -121,11 +220,13 @@ export default function PucTable({
                       {r.bsStage}
                     </span>
                   </td>
-                  <td style={{ color: '#94a3b8' }}>{r.fuelType}</td>
+                  <td>
+                    <FuelBadge fuel={r.fuelType} />
+                  </td>
                   <td className="truncate text-slate-200" title={r.customerName || '—'}>
                     {r.customerName && r.customerName.trim() ? r.customerName : '—'}
                   </td>
-                  <td style={{ color: '#94a3b8' }} className="font-mono text-xs truncate">
+                  <td className="font-mono text-xs whitespace-nowrap text-slate-200 tracking-wider">
                     {r.customerPhone}
                   </td>
                   <td style={{ color: '#64748b' }} className="truncate" title={r.agent || ''}>

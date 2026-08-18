@@ -121,14 +121,20 @@ export function parseISTDate(dateStr: string): Date | null {
 }
 
 /** Get current IST time components */
-export function getCurrentISTComponents() {
-  const now = toZonedTime(new Date(), IST);
-  return {
-    year: now.getFullYear(),
-    month: now.getMonth() + 1,
-    day: now.getDate(),
-    hours: now.getHours(),
-    minutes: now.getMinutes(),
-    seconds: now.getSeconds(),
-  };
+/** Get fuel short code (P / D / G) */
+export function getFuelShortCode(fuel?: string): 'P' | 'D' | 'G' {
+  if (!fuel) return 'P';
+  const f = fuel.trim().toUpperCase();
+  if (f === 'D' || f.startsWith('DIESEL')) return 'D';
+  if (f === 'G' || f.startsWith('GAS') || f.startsWith('CNG') || f.startsWith('LPG')) return 'G';
+  return 'P';
 }
+
+/** Get full fuel name */
+export function getFuelFullName(fuel?: string): string {
+  const code = getFuelShortCode(fuel);
+  if (code === 'D') return 'Diesel';
+  if (code === 'G') return 'Gas';
+  return 'Petrol';
+}
+

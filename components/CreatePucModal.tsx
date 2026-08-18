@@ -16,18 +16,26 @@ interface CreatePucModalProps {
 }
 
 const BS_STAGES = ['BS1', 'BS2', 'BS3', 'BS4', 'BS6'] as const;
-const FUEL_TYPES = ['Diesel', 'Petrol', 'Gas'] as const;
+const VEHICLE_CLASS_OPTIONS = ['MC', 'CAR', 'LORRY', 'MMV', 'CUSTOM'] as const;
+const FUEL_OPTIONS = [
+  { value: 'Petrol', label: 'Petrol (P)', code: 'P' },
+  { value: 'Diesel', label: 'Diesel (D)', code: 'D' },
+  { value: 'Gas', label: 'Gas (G)', code: 'G' },
+] as const;
 
 export default function CreatePucModal({ onClose, onSuccess, defaultDate }: CreatePucModalProps) {
   const [form, setForm] = useState({
     vehicleNo: '',
+    vehicleClass: 'CAR',
+    customClass: '',
     bsStage: '',
-    fuelType: '',
+    fuelType: 'Petrol',
     customerName: '',
     customerPhone: '',
     agent: '',
     issuedDate: defaultDate || getTodayISTDateString(),
   });
+  const [isCustomClass, setIsCustomClass] = useState(false);
   const [validityPreview, setValidityPreview] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -53,6 +61,16 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
       formattedValue = value.replace(/[\s-]/g, '').toUpperCase();
     } else if (name === 'customerPhone') {
       formattedValue = value.replace(/\D/g, '');
+    } else if (name === 'customClass') {
+      formattedValue = value.toUpperCase();
+    }
+
+    if (name === 'vehicleClass') {
+      if (value === 'CUSTOM') {
+        setIsCustomClass(true);
+      } else {
+        setIsCustomClass(false);
+      }
     }
 
     setForm((prev) => ({
@@ -74,6 +92,10 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
       newErrors.vehicleNo = 'Invalid format. Expected example: AP03AB1234';
     }
 
+    if (isCustomClass && !form.customClass.trim()) {
+      newErrors.customClass = 'Please enter custom vehicle class';
+    }
+
     if (!form.bsStage) newErrors.bsStage = 'BS Stage is required';
     if (!form.fuelType) newErrors.fuelType = 'Fuel type is required';
 
@@ -85,7 +107,7 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
     }
 
     return newErrors;
-  }, [form]);
+  }, [form, isCustomClass]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,6 +119,10 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
       return;
     }
 
+    const finalVehicleClass = isCustomClass
+      ? form.customClass.trim().toUpperCase() || 'CAR'
+      : form.vehicleClass || 'CAR';
+
     setLoading(true);
     try {
       const res = await fetch('/api/puc', {
@@ -104,6 +130,7 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vehicleNo: form.vehicleNo.replace(/[\s-]/g, '').toUpperCase(),
+          vehicleClass: finalVehicleClass,
           bsStage: form.bsStage,
           fuelType: form.fuelType,
           customerName: form.customerName.trim() || '—',
@@ -206,6 +233,49 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
             </div>
           </div>
 
+          {/* Class of Vehicle */}
+          <div>
+            <label className="form-label" htmlFor="puc-vehicleClass">
+              Class of Vehicle <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <select
+                id="puc-vehicleClass"
+                name="vehicleClass"
+                className="select-field"
+                value={isCustomClass ? 'CUSTOM' : form.vehicleClass}
+                onChange={handleChange}
+              >
+                <option value="MC">MC (Motorcycle / 2 Wheeler)</option>
+                <option value="CAR">CAR (Car / Light Motor Vehicle)</option>
+                <option value="LORRY">LORRY (Heavy Goods / Lorry)</option>
+                <option value="MMV">MMV (Medium Motor Vehicle)</option>
+                <option value="CUSTOM">CUSTOM TO TYPE...</option>
+              </select>
+
+              {isCustomClass && (
+                <div>
+                  <input
+                    id="puc-customClass"
+                    name="customClass"
+                    type="text"
+                    className="input-field uppercase font-semibold tracking-wider"
+                    placeholder="Type Vehicle Class (e.g. AUTO, BUS)"
+                    value={form.customClass}
+                    onChange={handleChange}
+                    style={errors.customClass ? { borderColor: '#ef4444' } : {}}
+                    autoFocus
+                  />
+                  {errors.customClass && (
+                    <p className="text-xs mt-1" style={{ color: '#f87171' }}>
+                      {errors.customClass}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* BS Stage + Fuel — two columns */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -246,10 +316,9 @@ export default function CreatePucModal({ onClose, onSuccess, defaultDate }: Crea
                 onChange={handleChange}
                 style={errors.fuelType ? { borderColor: '#ef4444' } : {}}
               >
-                <option value="">Select Fuel</option>
-                {FUEL_TYPES.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
+                {FUEL_OPTIONS.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label}
                   </option>
                 ))}
               </select>

@@ -2,8 +2,9 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IPucRecord extends Document {
   vehicleNo: string;
+  vehicleClass: string;
   bsStage: 'BS1' | 'BS2' | 'BS3' | 'BS4' | 'BS6';
-  fuelType: 'Diesel' | 'Petrol' | 'Gas';
+  fuelType: string;
   customerName: string;
   customerPhone: string;
   agent: string | null;
@@ -24,6 +25,13 @@ const PucRecordSchema = new Schema<IPucRecord>(
       uppercase: true,
       match: [/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/, 'Invalid vehicle number format'],
     },
+    vehicleClass: {
+      type: String,
+      required: false,
+      default: 'CAR',
+      trim: true,
+      uppercase: true,
+    },
     bsStage: {
       type: String,
       required: true,
@@ -32,7 +40,7 @@ const PucRecordSchema = new Schema<IPucRecord>(
     fuelType: {
       type: String,
       required: true,
-      enum: ['Diesel', 'Petrol', 'Gas'],
+      trim: true,
     },
     customerName: {
       type: String,
@@ -77,6 +85,7 @@ const PucRecordSchema = new Schema<IPucRecord>(
 
 // Indexes for fast querying
 PucRecordSchema.index({ vehicleNo: 1 });
+PucRecordSchema.index({ vehicleClass: 1 });
 PucRecordSchema.index({ validTill: 1 });
 PucRecordSchema.index({ issuedAt: 1 });
 PucRecordSchema.index({ issuedAt: 1, validTill: 1 });

@@ -104,7 +104,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             Expected Excel Columns:
           </p>
           <p>
-            Vehicle No · BS Stage · Fuel · Customer Name · Customer Phone · Agent ·{' '}
+            Vehicle No · Class (MC / CAR / LORRY / MMV) · BS Stage · Fuel (P / D / G) · Customer Name · Customer Phone · Agent ·{' '}
             <span style={{ color: '#f8fafc' }}>Issued Date (dd-mm-yyyy)</span>
           </p>
         </div>
