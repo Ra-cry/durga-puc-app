@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
       let query: Record<string, unknown> = {};
       if (type === 'expired') {
         if (startDate && endDate) {
-          query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate) } };
+          const maxEnd = new Date(Math.min(new Date(endDate).getTime(), Date.now()));
+          query = { validTill: { $gte: new Date(startDate), $lte: maxEnd } };
         } else {
           query = { validTill: { $lt: new Date() } };
         }
@@ -41,9 +42,10 @@ export async function GET(request: NextRequest) {
         if (startDate && endDate) {
           const s = new Date(startDate);
           const e = new Date(endDate);
+          const maxE = new Date(Math.min(e.getTime(), Date.now()));
           records = memoryList.filter((r) => {
             const d = new Date(r.validTill);
-            return d >= s && d <= e;
+            return d >= s && d <= maxE;
           });
         } else {
           records = memoryList.filter((r) => new Date(r.validTill) < new Date());
