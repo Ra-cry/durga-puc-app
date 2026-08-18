@@ -18,23 +18,49 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get('type') || 'old'; // 'old' | 'expired'
 
   try {
-    await dbConnect();
+    const conn = await dbConnect();
+    let records: any[] = [];
 
-    let query: Record<string, unknown> = {};
-
-    if (type === 'expired') {
-      if (startDate && endDate) {
-        query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate) } };
+    if (conn) {
+      let query: Record<string, unknown> = {};
+      if (type === 'expired') {
+        if (startDate && endDate) {
+          query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate) } };
+        } else {
+          query = { validTill: { $lt: new Date() } };
+        }
       } else {
-        query = { validTill: { $lt: new Date() } };
+        if (startDate && endDate) {
+          query = { issuedAt: { $gte: new Date(startDate), $lte: new Date(endDate) } };
+        }
       }
+      records = await PucRecord.find(query).sort({ issuedAt: -1 }).lean();
     } else {
-      if (startDate && endDate) {
-        query = { issuedAt: { $gte: new Date(startDate), $lte: new Date(endDate) } };
+      const memoryList = global.__inMemoryPucRecords || [];
+      if (type === 'expired') {
+        if (startDate && endDate) {
+          const s = new Date(startDate);
+          const e = new Date(endDate);
+          records = memoryList.filter((r) => {
+            const d = new Date(r.validTill);
+            return d >= s && d <= e;
+          });
+        } else {
+          records = memoryList.filter((r) => new Date(r.validTill) < new Date());
+        }
+      } else {
+        if (startDate && endDate) {
+          const s = new Date(startDate);
+          const e = new Date(endDate);
+          records = memoryList.filter((r) => {
+            const d = new Date(r.issuedAt);
+            return d >= s && d <= e;
+          });
+        } else {
+          records = [...memoryList];
+        }
       }
     }
-
-    const records = await PucRecord.find(query).sort({ issuedAt: -1 }).lean();
 
     const sheetData = records.map((r) => ({
       'Vehicle No': r.vehicleNo,
@@ -43,8 +69,8 @@ export async function GET(request: NextRequest) {
       'Customer Name': r.customerName,
       'Customer Phone': r.customerPhone,
       Agent: r.agent || '',
-      'Issued Date': formatIST(r.issuedAt),
-      'Valid Till': formatIST(r.validTill),
+      'Issued Date': formatIST(new Date(r.issuedAt)),
+      'Valid Till': formatIST(new Date(r.validTill)),
       Status: new Date(r.validTill) < new Date() ? 'Expired' : 'Active',
     }));
 
@@ -52,14 +78,12 @@ export async function GET(request: NextRequest) {
     const workbook = utils.book_new();
     utils.book_append_sheet(workbook, worksheet, 'PUC Records');
 
-    // Auto-size columns
     const colWidths = Object.keys(sheetData[0] || {}).map((key) => ({
       wch: Math.max(key.length, 15),
     }));
     worksheet['!cols'] = colWidths;
 
     const excelBuffer = write(workbook, { type: 'buffer', bookType: 'xlsx' });
-
     const filename = `puc-records-${type}-${new Date().toISOString().split('T')[0]}.xlsx`;
 
     return new NextResponse(excelBuffer, {
@@ -69,7 +93,7 @@ export async function GET(request: NextRequest) {
         'Content-Disposition': `attachment; filename="${filename}"`,
       },
     });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: 'Export failed' }, { status: 500 });
   }
 }
