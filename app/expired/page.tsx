@@ -10,10 +10,12 @@ export default function ExpiredPage() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [currentParams, setCurrentParams] = useState<FilterParams>({});
 
   // Load expired records
   const fetchRecords = useCallback(async (params: FilterParams = {}) => {
     setLoading(true);
+    setCurrentParams(params);
     try {
       const urlParams = new URLSearchParams({ type: 'expired', limit: '500' });
       if (params.startDate) urlParams.set('startDate', params.startDate);
@@ -70,6 +72,20 @@ export default function ExpiredPage() {
       setExporting(false);
     }
   }, []);
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/puc?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to delete record');
+        return;
+      }
+      fetchRecords(currentParams);
+    } catch {
+      alert('Error deleting record');
+    }
+  };
 
   return (
     <div className="min-h-screen" style={{ background: '#020617' }}>
@@ -132,6 +148,7 @@ export default function ExpiredPage() {
             loading={loading}
             emptyMessage="No expired records found"
             showStatus
+            onDelete={handleDelete}
           />
         </div>
       </main>
