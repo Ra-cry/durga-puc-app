@@ -6,36 +6,19 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export default function Header() {
-  const [time, setTime] = useState('');
-  const [date, setDate] = useState('');
+  const [dateStr, setDateStr] = useState('');
   const pathname = usePathname();
 
   useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const ist = new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-      }).format(now);
-
-      const d = new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      }).format(now);
-
-      setTime(ist);
-      setDate(d);
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
+    const now = new Date();
+    const formatted = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).format(now);
+    setDateStr(formatted);
   }, []);
 
   const navLinks = [
@@ -78,16 +61,16 @@ export default function Header() {
             </div>
           </div>
 
-          {/* IST Clock */}
+          {/* IST Date & Day */}
           <div className="hidden sm:flex flex-col items-end">
             <span
-              className="text-sm font-bold font-mono tabular-nums"
+              className="text-sm font-bold"
               style={{ color: '#38bdf8' }}
             >
-              {time}
+              {dateStr || 'Loading...'}
             </span>
-            <span className="text-xs" style={{ color: '#64748b' }}>
-              {date} IST
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
+              IST Date & Day
             </span>
           </div>
 
