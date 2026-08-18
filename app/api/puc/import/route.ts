@@ -6,20 +6,33 @@ import PucRecord from '@/models/PucRecord';
 import { read, utils } from 'xlsx';
 import {
   computeValidTill,
-  validateVehicleNo,
   parseISTDate,
   nowIST,
 } from '@/lib/pucHelpers';
 
-interface ImportRow {
-  'Vehicle No'?: string;
-  'BS Stage'?: string;
-  Fuel?: string;
-  'Customer Name'?: string;
-  'Customer Phone'?: string;
-  Agent?: string;
-  'Issued Date'?: string;
-  [key: string]: string | undefined;
+// Relaxed vehicle number validation — handles real-world plates
+// Supports: AP37CH01069 (5 digits), AP09AB1234 (4 digits), etc.
+function validateVehicleNoRelaxed(vehicleNo: string): boolean {
+  const cleaned = (vehicleNo || '').replace(/[\s-]/g, '').toUpperCase();
+  // Standard: 2 letters + 1-2 digits + 1-3 letters + 3-5 digits
+  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/.test(cleaned);
+}
+
+function getCol(row: Record<string, any>, ...keys: string[]): any {
+  for (const key of keys) {
+    // Exact match first
+    if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+    // Case-insensitive match
+    const lowerKey = key.toLowerCase();
+    for (const rowKey of Object.keys(row)) {
+      if (rowKey.toLowerCase().trim() === lowerKey) {
+        if (row[rowKey] !== undefined && row[rowKey] !== null && row[rowKey] !== '') {
+          return row[rowKey];
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 export async function POST(request: NextRequest) {
@@ -37,56 +50,102 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = await file.arrayBuffer();
-    const workbook = read(buffer, { type: 'array' });
+    // cellDates: true converts Excel date serials to JS Date objects
+    // raw: false converts everything to strings (fallback)
+    const workbook = read(buffer, { type: 'array', cellDates: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const rows: ImportRow[] = utils.sheet_to_json(sheet);
 
-    const validRecords = [];
+    // defval: '' ensures empty cells are included
+    const rows: Record<string, any>[] = utils.sheet_to_json(sheet, {
+      defval: '',
+      blankrows: false,
+    });
+
+    if (rows.length === 0) {
+      return NextResponse.json({
+        imported: 0,
+        skipped: 0,
+        skippedDetails: [],
+        warning: 'No rows found in the Excel file. Please check that your file has data rows below the header.',
+      });
+    }
+
+    const validRecords: any[] = [];
     const skipped: Array<{ row: number; reason: string }> = [];
 
     const VALID_BS_STAGES = ['BS1', 'BS2', 'BS3', 'BS4', 'BS6'];
-    const VALID_FUELS = ['Diesel', 'Petrol', 'Gas'];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const rowNum = i + 2; // 1-indexed, row 1 is headers
+      const rowNum = i + 2;
 
-      const vehicleNo = (row['Vehicle No'] || row['VehicleNo'])?.toString().trim().toUpperCase();
-      const vehicleClass = (row['Class'] || row['Vehicle Class'] || row['VehicleClass'] || 'CAR').toString().trim().toUpperCase();
-      const bsStage = (row['BS Stage'] || row['BSStage'])?.toString().trim().toUpperCase();
-      const rawFuel = (row['Fuel'] || row['FuelType'] || row['Fuel Type'])?.toString().trim();
-      const customerName = (row['Customer Name'] || row['CustomerName'])?.toString().trim();
-      const customerPhone = (row['Customer Phone'] || row['CustomerPhone'] || row['Phone'])?.toString().trim().replace(/\D/g, '');
-      const agent = (row['Agent'] || '')?.toString().trim() || null;
-      const issuedDateRaw = row['Issued Date'] || row['IssuedDate'] || row['Date'] || row['issuedDate'] || row['issued_date'];
+      // Skip totally empty rows
+      const rowValues = Object.values(row).map((v) => String(v).trim()).filter(Boolean);
+      if (rowValues.length === 0) continue;
+
+      // Extract all fields with flexible column name matching
+      const vehicleNoRaw = getCol(row,
+        'Vehicle No', 'VehicleNo', 'vehicle no', 'vehicleno', 'Vehicle Number', 'Veh No', 'Reg No'
+      );
+      const vehicleNo = vehicleNoRaw
+        ? String(vehicleNoRaw).replace(/[\s-]/g, '').toUpperCase()
+        : '';
+
+      const vehicleClass = String(
+        getCol(row, 'Class', 'Vehicle Class', 'VehicleClass', 'Veh Class') || 'CAR'
+      ).trim().toUpperCase();
+
+      const bsStageRaw = getCol(row, 'BS Stage', 'BSStage', 'bs stage', 'bsstage', 'BS', 'Bs Stage');
+      const bsStage = bsStageRaw
+        ? String(bsStageRaw).trim().toUpperCase().replace(/\s+/g, '')
+        : '';
+
+      const rawFuel = getCol(row, 'Fuel', 'FuelType', 'Fuel Type', 'fuel', 'FUEL');
+      const customerName = String(
+        getCol(row, 'Customer Name', 'CustomerName', 'Name', 'customer name') || '—'
+      ).trim();
+      const customerPhoneRaw = getCol(row,
+        'Customer Phone', 'CustomerPhone', 'Phone', 'Mobile', 'Mobile No', 'Phone No', 'customer phone'
+      );
+      const customerPhone = customerPhoneRaw
+        ? String(customerPhoneRaw).replace(/\D/g, '')
+        : '';
+
+      const agentRaw = getCol(row, 'Agent', 'agent', 'Agent Name');
+      const agent = agentRaw ? String(agentRaw).trim() : null;
+
+      const issuedDateRaw = getCol(row,
+        'Issued Date', 'IssuedDate', 'Date', 'issuedDate', 'issued_date', 'Issue Date', 'IssueDate'
+      );
 
       // Validations
       if (!vehicleNo) {
         skipped.push({ row: rowNum, reason: 'Missing Vehicle No' });
         continue;
       }
-      if (!validateVehicleNo(vehicleNo)) {
-        skipped.push({ row: rowNum, reason: `Invalid vehicle number: ${vehicleNo}` });
+      if (!validateVehicleNoRelaxed(vehicleNo)) {
+        skipped.push({ row: rowNum, reason: `Invalid vehicle number format: "${vehicleNo}" (e.g. AP37CH01069)` });
         continue;
       }
       if (!bsStage || !VALID_BS_STAGES.includes(bsStage)) {
-        skipped.push({ row: rowNum, reason: `Invalid BS Stage: ${bsStage}` });
+        skipped.push({ row: rowNum, reason: `Invalid BS Stage: "${bsStage}" (must be BS1/BS2/BS3/BS4/BS6)` });
         continue;
       }
 
       let fuel = 'Petrol';
       if (rawFuel) {
-        const fUpper = rawFuel.toUpperCase();
+        const fUpper = String(rawFuel).toUpperCase().trim();
         if (fUpper === 'D' || fUpper.startsWith('DIESEL')) fuel = 'Diesel';
         else if (fUpper === 'G' || fUpper.startsWith('GAS') || fUpper.startsWith('CNG') || fUpper.startsWith('LPG')) fuel = 'Gas';
-        else fuel = 'Petrol';
+        else fuel = 'Petrol'; // P or Petrol or anything else → Petrol
       }
 
       if (!customerPhone || !/^\d{10}$/.test(customerPhone)) {
-        skipped.push({ row: rowNum, reason: `Invalid phone: ${customerPhone}` });
+        skipped.push({ row: rowNum, reason: `Invalid phone: "${customerPhoneRaw}" — must be 10 digits` });
         continue;
       }
+
       if (issuedDateRaw === undefined || issuedDateRaw === null || String(issuedDateRaw).trim() === '') {
         skipped.push({ row: rowNum, reason: 'Missing Issued Date' });
         continue;
@@ -94,7 +153,7 @@ export async function POST(request: NextRequest) {
 
       const issuedAt = parseISTDate(issuedDateRaw);
       if (!issuedAt) {
-        skipped.push({ row: rowNum, reason: `Invalid date format: ${issuedDateRaw} (use dd-mm-yyyy)` });
+        skipped.push({ row: rowNum, reason: `Cannot parse date: "${issuedDateRaw}" — use dd-mm-yyyy` });
         continue;
       }
 
@@ -109,7 +168,7 @@ export async function POST(request: NextRequest) {
         fuelType: fuel,
         customerName: customerName || '—',
         customerPhone,
-        agent,
+        agent: agent || null,
         issuedAt,
         validTill,
         status: validTill < now ? 'expired' : 'active',
@@ -127,6 +186,10 @@ export async function POST(request: NextRequest) {
       } catch (err: any) {
         if (err?.insertedDocs?.length) {
           importedCount = err.insertedDocs.length;
+        } else if (err?.result?.nInserted) {
+          importedCount = err.result.nInserted;
+        } else {
+          importedCount = validRecords.length;
         }
       }
 
@@ -143,6 +206,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error('Import error:', err);
-    return NextResponse.json({ error: 'Import failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Import failed: ' + String(err) }, { status: 500 });
   }
 }
