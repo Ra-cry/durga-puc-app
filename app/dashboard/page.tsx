@@ -55,10 +55,10 @@ export default function DashboardPage() {
     fetchExpiredToday();
   }, [fetchToday, fetchExpiredToday]);
 
-  // F7 keypress reveals import button
+  // F4 keypress reveals import button
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'F3') {
+      if (e.key === 'F4') {
         e.preventDefault();
         setShowImportBtn((prev) => !prev);
       }
@@ -312,9 +312,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* F7 hint */}
-        <p className="text-xs text-center" style={{ color: '#1e293b' }}>
-          Press F3 to reveal import button
+        {/* F4 hint */}
+        <p className="text-xs text-center font-medium" style={{ color: '#475569' }}>
+          Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">F4</kbd> to reveal import button
         </p>
       </main>
 
