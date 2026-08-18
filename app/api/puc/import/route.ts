@@ -135,6 +135,7 @@ export async function POST(request: NextRequest) {
 
     const validRecords: any[] = [];
     const skipped: Array<{ row: number; reason: string }> = [];
+    const seenInFile = new Set<string>();
     const now = nowIST();
 
     // Single-pass direct array iteration
@@ -176,12 +177,18 @@ export async function POST(request: NextRequest) {
         else if (fUpper === 'G' || fUpper.startsWith('CNG') || fUpper.startsWith('GAS') || fUpper.startsWith('LPG')) fuel = 'Gas';
       }
 
-      // 4. Customer Phone
+      // 4. Customer Phone (optional)
       const customerPhoneRaw = colMap.customerPhone !== -1 ? row[colMap.customerPhone] : '';
-      const customerPhone = customerPhoneRaw ? String(customerPhoneRaw).replace(/\D/g, '') : '';
-      if (!customerPhone || customerPhone.length !== 10) {
-        skipped.push({ row: rowNum, reason: `Invalid phone: "${customerPhoneRaw}" — must be 10 digits` });
-        continue;
+      let customerPhone = '—';
+      if (customerPhoneRaw !== undefined && customerPhoneRaw !== null && String(customerPhoneRaw).trim() !== '') {
+        const digits = String(customerPhoneRaw).replace(/\D/g, '');
+        if (digits.length >= 10) {
+          customerPhone = digits.slice(-10);
+        } else if (digits.length > 0) {
+          customerPhone = digits;
+        } else {
+          customerPhone = String(customerPhoneRaw).trim() || '—';
+        }
       }
 
       // 5. Issued Date
@@ -197,6 +204,18 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      const validTill = computeValidTill(issuedAt, bsStage);
+
+      // Deduplication within the Excel file:
+      // If vehicleNo + issuedAt + validTill are all identical, skip as duplicate.
+      // If issue date or validity differs (e.g. renewals), allow it.
+      const dupKey = `${vehicleNo}|${issuedAt.getTime()}|${validTill.getTime()}`;
+      if (seenInFile.has(dupKey)) {
+        skipped.push({ row: rowNum, reason: `Duplicate record in file for ${vehicleNo} (identical issue & validity dates)` });
+        continue;
+      }
+      seenInFile.add(dupKey);
+
       // 6. Other optional fields
       const vehicleClassRaw = colMap.vehicleClass !== -1 ? row[colMap.vehicleClass] : '';
       const vehicleClass = vehicleClassRaw ? String(vehicleClassRaw).trim().toUpperCase() || 'CAR' : 'CAR';
@@ -207,7 +226,6 @@ export async function POST(request: NextRequest) {
       const agentRaw = colMap.agent !== -1 ? row[colMap.agent] : '';
       const agent = agentRaw ? String(agentRaw).trim() : null;
 
-      const validTill = computeValidTill(issuedAt, bsStage);
       const isExpired = validTill.getTime() < now.getTime();
 
       validRecords.push({
@@ -230,40 +248,84 @@ export async function POST(request: NextRequest) {
     let importedCount = 0;
 
     if (validRecords.length > 0) {
+      // Deduplicate against existing database records & in-memory store
+      const existingKeySet = new Set<string>();
+
       if (conn) {
         try {
-          // Native high-speed collection batch insert in chunks of 2,500
-          const BATCH_SIZE = 2500;
-          for (let b = 0; b < validRecords.length; b += BATCH_SIZE) {
-            const chunk = validRecords.slice(b, b + BATCH_SIZE);
-            const result = await PucRecord.collection.insertMany(chunk, { ordered: false });
-            importedCount += result.insertedCount || chunk.length;
+          const uniqueVehicles = Array.from(new Set(validRecords.map((r) => r.vehicleNo)));
+          const existingDocs = await PucRecord.find(
+            { vehicleNo: { $in: uniqueVehicles } },
+            { vehicleNo: 1, issuedAt: 1, validTill: 1 }
+          ).lean();
+
+          for (const doc of existingDocs) {
+            existingKeySet.add(
+              `${doc.vehicleNo}|${new Date(doc.issuedAt).getTime()}|${new Date(doc.validTill).getTime()}`
+            );
           }
-        } catch (err: any) {
-          console.error('[IMPORT] MongoDB insert error:', err?.message || err);
-          if (err?.insertedCount !== undefined) {
-            importedCount = err.insertedCount;
-          } else if (err?.result?.nInserted !== undefined) {
-            importedCount = err.result.nInserted;
-          } else {
-            importedCount = validRecords.length;
-          }
+        } catch (e) {
+          console.warn('[IMPORT] Could not pre-check DB duplicates:', e);
         }
-      } else {
-        importedCount = validRecords.length;
       }
 
-      // Always maintain fallback in-memory records
-      if (!global.__inMemoryPucRecords) {
-        global.__inMemoryPucRecords = [];
+      if (global.__inMemoryPucRecords) {
+        for (const doc of global.__inMemoryPucRecords) {
+          existingKeySet.add(
+            `${doc.vehicleNo}|${new Date(doc.issuedAt).getTime()}|${new Date(doc.validTill).getTime()}`
+          );
+        }
       }
-      const memDocs = validRecords.map((r, idx) => ({
-        ...r,
-        _id: `imp_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
-      }));
-      global.__inMemoryPucRecords = [...memDocs, ...global.__inMemoryPucRecords];
-      if (global.__inMemoryPucRecords.length > 50000) {
-        global.__inMemoryPucRecords = global.__inMemoryPucRecords.slice(0, 50000);
+
+      const recordsToInsert = validRecords.filter((r) => {
+        const k = `${r.vehicleNo}|${r.issuedAt.getTime()}|${r.validTill.getTime()}`;
+        return !existingKeySet.has(k);
+      });
+
+      const duplicateDbCount = validRecords.length - recordsToInsert.length;
+      if (duplicateDbCount > 0) {
+        skipped.push({
+          row: 0,
+          reason: `${duplicateDbCount} record(s) already exist in database with identical dates and were not re-imported.`,
+        });
+      }
+
+      if (recordsToInsert.length > 0) {
+        if (conn) {
+          try {
+            // Native high-speed collection batch insert in chunks of 2,500
+            const BATCH_SIZE = 2500;
+            for (let b = 0; b < recordsToInsert.length; b += BATCH_SIZE) {
+              const chunk = recordsToInsert.slice(b, b + BATCH_SIZE);
+              const result = await PucRecord.collection.insertMany(chunk, { ordered: false });
+              importedCount += result.insertedCount || chunk.length;
+            }
+          } catch (err: any) {
+            console.error('[IMPORT] MongoDB insert error:', err?.message || err);
+            if (err?.insertedCount !== undefined) {
+              importedCount = err.insertedCount;
+            } else if (err?.result?.nInserted !== undefined) {
+              importedCount = err.result.nInserted;
+            } else {
+              importedCount = recordsToInsert.length;
+            }
+          }
+        } else {
+          importedCount = recordsToInsert.length;
+        }
+
+        // Always maintain fallback in-memory records
+        if (!global.__inMemoryPucRecords) {
+          global.__inMemoryPucRecords = [];
+        }
+        const memDocs = recordsToInsert.map((r, idx) => ({
+          ...r,
+          _id: `imp_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+        }));
+        global.__inMemoryPucRecords = [...memDocs, ...global.__inMemoryPucRecords];
+        if (global.__inMemoryPucRecords.length > 50000) {
+          global.__inMemoryPucRecords = global.__inMemoryPucRecords.slice(0, 50000);
+        }
       }
     }
 

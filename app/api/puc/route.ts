@@ -207,8 +207,8 @@ export async function POST(request: NextRequest) {
     const { vehicleNo, vehicleClass, bsStage, fuelType, customerName, customerPhone, agent, issuedDate } = body;
 
     // Validation
-    if (!vehicleNo || !bsStage || !fuelType || !customerPhone) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!vehicleNo || !bsStage || !fuelType) {
+      return NextResponse.json({ error: 'Missing required fields (Vehicle No, BS Stage, Fuel Type)' }, { status: 400 });
     }
 
     const normalizedVehicleNo = sanitizeVehicleNo(vehicleNo);
@@ -219,10 +219,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const cleanPhone = (customerPhone || '').replace(/\D/g, '');
-    if (!/^\d{10}$/.test(cleanPhone)) {
-      return NextResponse.json({ error: 'Phone number must be exactly 10 digits' }, { status: 400 });
-    }
+    const digitsOnly = (customerPhone || '').replace(/\D/g, '');
+    const cleanPhone = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : (digitsOnly || '—');
 
     let issuedAt: Date;
     if (issuedDate) {
@@ -259,6 +257,36 @@ export async function POST(request: NextRequest) {
     };
 
     const conn = await dbConnect();
+
+    // Check if duplicate record with identical vehicle, issue date, and validity already exists
+    if (conn) {
+      const existingDoc = await PucRecord.findOne({
+        vehicleNo: normalizedVehicleNo,
+        issuedAt,
+        validTill,
+      }).lean();
+
+      if (existingDoc) {
+        return NextResponse.json(
+          { error: `A certificate for ${normalizedVehicleNo} with identical issue date and validity already exists.` },
+          { status: 409 }
+        );
+      }
+    } else if (global.__inMemoryPucRecords) {
+      const existingMem = global.__inMemoryPucRecords.find(
+        (r) =>
+          r.vehicleNo === normalizedVehicleNo &&
+          new Date(r.issuedAt).getTime() === issuedAt.getTime() &&
+          new Date(r.validTill).getTime() === validTill.getTime()
+      );
+      if (existingMem) {
+        return NextResponse.json(
+          { error: `A certificate for ${normalizedVehicleNo} with identical issue date and validity already exists.` },
+          { status: 409 }
+        );
+      }
+    }
+
     let savedRecord = recordData;
 
     if (conn) {
