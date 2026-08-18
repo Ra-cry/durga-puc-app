@@ -45,9 +45,16 @@ export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalPro
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    let formattedValue = value;
+    if (name === 'vehicleNo') {
+      formattedValue = value.replace(/[\s-]/g, '').toUpperCase();
+    } else if (name === 'customerPhone') {
+      formattedValue = value.replace(/\D/g, '');
+    }
+
     setForm((prev) => ({
       ...prev,
-      [name]: name === 'vehicleNo' ? value.toUpperCase() : value,
+      [name]: formattedValue,
     }));
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }));
@@ -57,19 +64,21 @@ export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalPro
   const validate = useCallback(() => {
     const newErrors: Record<string, string> = {};
 
-    if (!form.vehicleNo.trim()) {
+    const cleanVehicle = (form.vehicleNo || '').replace(/[\s-]/g, '').toUpperCase();
+    if (!cleanVehicle) {
       newErrors.vehicleNo = 'Vehicle number is required';
-    } else if (!validateVehicleNo(form.vehicleNo)) {
-      newErrors.vehicleNo = 'Invalid format. Expected: AP03AB1234';
+    } else if (!validateVehicleNo(cleanVehicle)) {
+      newErrors.vehicleNo = 'Invalid format. Expected example: AP03AB1234';
     }
 
     if (!form.bsStage) newErrors.bsStage = 'BS Stage is required';
     if (!form.fuelType) newErrors.fuelType = 'Fuel type is required';
     if (!form.customerName.trim()) newErrors.customerName = 'Customer name is required';
 
-    if (!form.customerPhone.trim()) {
+    const cleanPhone = (form.customerPhone || '').replace(/\D/g, '');
+    if (!cleanPhone) {
       newErrors.customerPhone = 'Phone number is required';
-    } else if (!/^\d{10}$/.test(form.customerPhone.trim())) {
+    } else if (!/^\d{10}$/.test(cleanPhone)) {
       newErrors.customerPhone = 'Phone must be exactly 10 digits';
     }
 
@@ -92,11 +101,11 @@ export default function CreatePucModal({ onClose, onSuccess }: CreatePucModalPro
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vehicleNo: form.vehicleNo.trim().toUpperCase(),
+          vehicleNo: form.vehicleNo.replace(/[\s-]/g, '').toUpperCase(),
           bsStage: form.bsStage,
           fuelType: form.fuelType,
           customerName: form.customerName.trim(),
-          customerPhone: form.customerPhone.trim(),
+          customerPhone: form.customerPhone.replace(/\D/g, ''),
           agent: form.agent.trim() || null,
         }),
       });
