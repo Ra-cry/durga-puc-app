@@ -308,22 +308,22 @@ input[type="date"].input-field::-webkit-calendar-picker-indicator:hover {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8125rem;
+  font-size: 0.78rem;
 }
 
 .data-table thead tr {
-  background: rgba(30, 41, 59, 0.6);
+  background: rgba(30, 41, 59, 0.7);
   border-bottom: 1px solid #1e293b;
 }
 
 .data-table thead th {
-  padding: 0.625rem 0.5rem;
+  padding: 0.5rem 0.35rem;
   text-align: left;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
   color: #64748b;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
@@ -337,7 +337,7 @@ input[type="date"].input-field::-webkit-calendar-picker-indicator:hover {
 }
 
 .data-table tbody td {
-  padding: 0.625rem 0.5rem;
+  padding: 0.5rem 0.35rem;
   color: #cbd5e1;
   vertical-align: middle;
 }
