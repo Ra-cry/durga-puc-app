@@ -89,6 +89,14 @@ export async function POST(request: NextRequest) {
       String(h ?? '').trim().replace(/\n/g, ' ').replace(/\s+/g, ' ')
     );
 
+    // DEBUG: Log what was detected so we can see in dev server console
+    console.log('[IMPORT] Total raw rows:', rawRows.length);
+    console.log('[IMPORT] Header row index:', headerRowIdx);
+    console.log('[IMPORT] Detected headers:', JSON.stringify(headerRow));
+    if (rawRows[headerRowIdx + 1]) {
+      console.log('[IMPORT] First data row:', JSON.stringify(rawRows[headerRowIdx + 1]));
+    }
+
     // Step 3: Build rows as objects from detected header
     const dataRows: Record<string, any>[] = [];
     for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
@@ -103,11 +111,16 @@ export async function POST(request: NextRequest) {
       dataRows.push(rowObj);
     }
 
+    console.log('[IMPORT] Data rows found:', dataRows.length);
+    if (dataRows.length > 0) {
+      console.log('[IMPORT] First data row parsed:', JSON.stringify(dataRows[0]));
+    }
+
     if (dataRows.length === 0) {
       return NextResponse.json({
         imported: 0,
         skipped: 0,
-        skippedDetails: [{ row: 0, reason: `No data rows found. Header detected at row ${headerRowIdx + 1}: [${headerRow.join(', ')}]` }],
+        skippedDetails: [{ row: 0, reason: `No data rows found. Headers detected: [${headerRow.filter(Boolean).join(', ')}]` }],
       });
     }
 
