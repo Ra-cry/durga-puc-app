@@ -16,27 +16,29 @@ export function toIST(date: Date): Date {
 /** Start of today in IST (as UTC Date for MongoDB queries) */
 export function startOfTodayIST(): Date {
   const nowInIST = toZonedTime(new Date(), IST);
-  const startIST = startOfDay(nowInIST);
-  return fromZonedTime(startIST, IST);
+  const y = nowInIST.getFullYear();
+  const m = nowInIST.getMonth();
+  const d = nowInIST.getDate();
+  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) - 330 * 60 * 1000);
 }
 
 /** End of today in IST (as UTC Date for MongoDB queries) */
 export function endOfTodayIST(): Date {
   const nowInIST = toZonedTime(new Date(), IST);
-  const endIST = endOfDay(nowInIST);
-  return fromZonedTime(endIST, IST);
+  const y = nowInIST.getFullYear();
+  const m = nowInIST.getMonth();
+  const d = nowInIST.getDate();
+  return new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - 330 * 60 * 1000);
 }
 
 /** Start of a given IST date */
 export function startOfDayIST(year: number, month: number, day: number): Date {
-  const istDate = new Date(year, month - 1, day, 0, 0, 0);
-  return fromZonedTime(istDate, IST);
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - 330 * 60 * 1000);
 }
 
 /** End of a given IST date */
 export function endOfDayIST(year: number, month: number, day: number): Date {
-  const istDate = new Date(year, month - 1, day, 23, 59, 59, 999);
-  return fromZonedTime(istDate, IST);
+  return new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - 330 * 60 * 1000);
 }
 
 /** Start of a month in IST */
@@ -98,68 +100,86 @@ export function validateVehicleNo(vehicleNo: string): boolean {
 
 /** Parse dd-mm-yyyy, yyyy-mm-dd, Excel serial number, or Date object to a Date in IST */
 export function parseISTDate(input: any): Date | null {
-  if (!input) return null;
+  if (input === null || input === undefined || input === '') return null;
 
-  // Handle JS Date object
+  // 1. Handle JS Date object (e.g. from xlsx cellDates: true)
   if (input instanceof Date) {
     if (isNaN(input.getTime())) return null;
-    const y = input.getUTCFullYear();
-    const m = input.getUTCMonth();
-    const d = input.getUTCDate();
-    const istDate = new Date(y, m, d, 12, 0, 0);
-    return fromZonedTime(istDate, IST);
+    // Round to nearest second to eliminate SheetJS float microsecond rounding errors
+    const rounded = new Date(Math.round(input.getTime() / 1000) * 1000);
+    const zoned = toZonedTime(rounded, IST);
+    const y = zoned.getFullYear();
+    const m = zoned.getMonth();
+    const d = zoned.getDate();
+    return new Date(Date.UTC(y, m, d, 6, 30, 0)); // Midday 12:00 IST (06:30 UTC)
   }
 
-  // Handle Excel serial date numbers (e.g. 46252)
-  const num = typeof input === 'number' ? input : Number(String(input).trim());
-  if (!isNaN(num) && num > 1000 && num < 100000) {
-    // Excel base epoch is 1899-12-30 (25569 days to 1970-01-01)
-    const utcDays = Math.floor(num - 25569);
-    const utcValue = utcDays * 86400;
-    const dateInfo = new Date(utcValue * 1000);
-    if (!isNaN(dateInfo.getTime())) {
-      const year = dateInfo.getUTCFullYear();
-      const month = dateInfo.getUTCMonth();
-      const day = dateInfo.getUTCDate();
-      const istDate = new Date(year, month, day, 12, 0, 0);
-      return fromZonedTime(istDate, IST);
+  // 2. Handle Excel serial date numbers (e.g. 46253 or "46253" or 46253.25)
+  const isPureNumber = typeof input === 'number' || (
+    typeof input === 'string' &&
+    /^\d+(\.\d+)?$/.test(input.trim()) &&
+    Number(input.trim()) > 1000 &&
+    Number(input.trim()) < 100000
+  );
+
+  if (isPureNumber) {
+    const num = Number(input);
+    if (!isNaN(num) && num > 1000 && num < 100000) {
+      // Excel epoch: 1899-12-30. 25569 is days to 1970-01-01.
+      const utcDays = Math.floor(num - 25569);
+      const ms = utcDays * 86400 * 1000;
+      const dateObj = new Date(ms);
+      if (!isNaN(dateObj.getTime())) {
+        const y = dateObj.getUTCFullYear();
+        const m = dateObj.getUTCMonth();
+        const d = dateObj.getUTCDate();
+        return new Date(Date.UTC(y, m, d, 6, 30, 0));
+      }
     }
   }
 
   const str = String(input).trim();
   if (!str) return null;
 
-  // Standard string date parsing (splits on -, /, .)
-  const parts = str.split(/[-/.]/);
-  if (parts.length === 3) {
+  // 3. String date parsing — extract leading date portion if time is present
+  // Handles "19-08-2026 10:30 AM", "19/08/2026", "2026-08-19", "19.08.2026", "19-08-26"
+  const dateMatch = str.match(/^(\d{1,4})[-/. ](\d{1,2})[-/. ](\d{1,4})/);
+  if (dateMatch) {
     let year: number;
     let month: number;
     let day: number;
 
-    if (parts[0].length === 4) {
+    const p1 = parseInt(dateMatch[1], 10);
+    const p2 = parseInt(dateMatch[2], 10);
+    const p3 = parseInt(dateMatch[3], 10);
+
+    if (dateMatch[1].length === 4) {
       // yyyy-mm-dd
-      [year, month, day] = parts.map(Number);
+      year = p1;
+      month = p2;
+      day = p3;
     } else {
-      // dd-mm-yyyy
-      [day, month, year] = parts.map(Number);
+      // dd-mm-yyyy or dd-mm-yy
+      day = p1;
+      month = p2;
+      year = p3 < 100 ? 2000 + p3 : p3;
     }
 
     if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
-      if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1900) {
-        const istDate = new Date(year, month - 1, day, 12, 0, 0);
-        return fromZonedTime(istDate, IST);
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1900 && year <= 2100) {
+        return new Date(Date.UTC(year, month - 1, day, 6, 30, 0));
       }
     }
   }
 
-  // Fallback for Date.parse
+  // 4. Fallback for ISO strings or English date strings like "19 Aug 2026"
   const parsed = new Date(str);
   if (!isNaN(parsed.getTime())) {
-    const y = parsed.getFullYear();
-    const m = parsed.getMonth();
-    const d = parsed.getDate();
-    const istDate = new Date(y, m, d, 12, 0, 0);
-    return fromZonedTime(istDate, IST);
+    const zoned = toZonedTime(parsed, IST);
+    const y = zoned.getFullYear();
+    const m = zoned.getMonth();
+    const d = zoned.getDate();
+    return new Date(Date.UTC(y, m, d, 6, 30, 0));
   }
 
   return null;
