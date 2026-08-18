@@ -106,6 +106,24 @@ export default function DashboardPage() {
     fetchExpiredToday();
   };
 
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/puc?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to delete record');
+        return;
+      }
+      fetchToday();
+      fetchExpiredToday();
+      if (searchQuery.trim()) {
+        handleSearch(searchQuery);
+      }
+    } catch {
+      alert('Error deleting record');
+    }
+  };
+
   return (
     <div className="min-h-screen" style={{ background: '#020617' }}>
       <Header />
@@ -197,6 +215,7 @@ export default function DashboardPage() {
               loading={loadingSearch}
               emptyMessage={`No vehicles found matching "${searchQuery}"`}
               showStatus
+              onDelete={handleDelete}
             />
           </div>
         )}
@@ -278,6 +297,7 @@ export default function DashboardPage() {
                 loading={loadingToday}
                 emptyMessage="No PUCs issued today yet"
                 showIssuedAt={false}
+                onDelete={handleDelete}
               />
             </div>
           </div>
@@ -307,15 +327,11 @@ export default function DashboardPage() {
                 emptyMessage="No PUCs expiring today"
                 showIssuedAt={false}
                 showStatus
+                onDelete={handleDelete}
               />
             </div>
           </div>
         </div>
-
-        {/* F4 hint */}
-        <p className="text-xs text-center font-medium" style={{ color: '#475569' }}>
-          Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">F4</kbd> to reveal import button
-        </p>
       </main>
 
       {showCreateModal && (
