@@ -77,10 +77,6 @@ export async function POST(request: NextRequest) {
         skipped.push({ row: rowNum, reason: `Invalid Fuel type: ${fuel}` });
         continue;
       }
-      if (!customerName) {
-        skipped.push({ row: rowNum, reason: 'Missing Customer Name' });
-        continue;
-      }
       if (!customerPhone || !/^\d{10}$/.test(customerPhone)) {
         skipped.push({ row: rowNum, reason: `Invalid phone: ${customerPhone}` });
         continue;
@@ -103,7 +99,7 @@ export async function POST(request: NextRequest) {
         vehicleNo,
         bsStage,
         fuelType: fuel,
-        customerName,
+        customerName: customerName || '—',
         customerPhone,
         agent,
         issuedAt,

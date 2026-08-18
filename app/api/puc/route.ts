@@ -61,8 +61,21 @@ export async function GET(request: NextRequest) {
           query = { issuedAt: { $gte: new Date(startDate), $lte: new Date(endDate) } };
         }
       } else if (type === 'search' && search) {
-        const cleanSearch = sanitizeVehicleNo(search);
-        query = { vehicleNo: { $regex: cleanSearch, $options: 'i' } };
+        const searchTrim = search.trim();
+        const searchClean = searchTrim.replace(/[\s-]/g, '');
+        const searchDigits = searchTrim.replace(/\D/g, '');
+
+        const orList: Record<string, unknown>[] = [
+          { vehicleNo: { $regex: searchClean || searchTrim, $options: 'i' } },
+          { customerName: { $regex: searchTrim, $options: 'i' } },
+          { agent: { $regex: searchTrim, $options: 'i' } },
+          { fuelType: { $regex: searchTrim, $options: 'i' } },
+          { bsStage: { $regex: searchTrim, $options: 'i' } },
+        ];
+        if (searchDigits) {
+          orList.push({ customerPhone: { $regex: searchDigits } });
+        }
+        query = { $or: orList };
       }
 
       const [records, total] = await Promise.all([
@@ -119,10 +132,26 @@ export async function GET(request: NextRequest) {
         });
       }
     } else if (type === 'search' && search) {
-      const cleanSearch = sanitizeVehicleNo(search);
-      memoryList = memoryList.filter((r) =>
-        r.vehicleNo.toUpperCase().includes(cleanSearch)
-      );
+      const term = search.trim().toLowerCase();
+      const termClean = term.replace(/[\s-]/g, '');
+      const termDigits = term.replace(/\D/g, '');
+      memoryList = memoryList.filter((r) => {
+        const vNo = (r.vehicleNo || '').toLowerCase();
+        const cName = (r.customerName || '').toLowerCase();
+        const cPhone = (r.customerPhone || '').replace(/\D/g, '');
+        const ag = (r.agent || '').toLowerCase();
+        const fuel = (r.fuelType || '').toLowerCase();
+        const bs = (r.bsStage || '').toLowerCase();
+        return (
+          vNo.includes(term) ||
+          vNo.replace(/[\s-]/g, '').includes(termClean) ||
+          cName.includes(term) ||
+          (termDigits && cPhone.includes(termDigits)) ||
+          ag.includes(term) ||
+          fuel.includes(term) ||
+          bs.includes(term)
+        );
+      });
     }
 
     memoryList.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
@@ -160,7 +189,7 @@ export async function POST(request: NextRequest) {
     const { vehicleNo, bsStage, fuelType, customerName, customerPhone, agent, issuedDate } = body;
 
     // Validation
-    if (!vehicleNo || !bsStage || !fuelType || !customerName || !customerPhone) {
+    if (!vehicleNo || !bsStage || !fuelType || !customerPhone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -198,7 +227,7 @@ export async function POST(request: NextRequest) {
       vehicleNo: normalizedVehicleNo,
       bsStage,
       fuelType,
-      customerName: customerName.trim(),
+      customerName: customerName?.trim() || '—',
       customerPhone: cleanPhone,
       agent: agent?.trim() || null,
       issuedAt,
@@ -218,7 +247,7 @@ export async function POST(request: NextRequest) {
           vehicleNo: normalizedVehicleNo,
           bsStage,
           fuelType,
-          customerName: customerName.trim(),
+          customerName: customerName?.trim() || '—',
           customerPhone: cleanPhone,
           agent: agent?.trim() || null,
           issuedAt,

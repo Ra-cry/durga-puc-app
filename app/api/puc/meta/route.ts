@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
 
     const yearSet = new Set<number>();
     const monthsByYear: Record<number, Set<number>> = {};
+    const weeksByYearMonth: Record<string, Set<number>> = {};
+    const daysByYearMonth: Record<string, Set<number>> = {};
 
     for (const doc of allDocs) {
       const rawDate = doc[dateField as keyof typeof doc] as Date | string;
@@ -46,10 +48,19 @@ export async function GET(request: NextRequest) {
 
       const y = d.getFullYear();
       const m = d.getMonth() + 1;
+      const day = d.getDate();
+      const week = Math.ceil(day / 7);
 
       yearSet.add(y);
       if (!monthsByYear[y]) monthsByYear[y] = new Set();
       monthsByYear[y].add(m);
+
+      const key = `${y}-${m}`;
+      if (!weeksByYearMonth[key]) weeksByYearMonth[key] = new Set();
+      weeksByYearMonth[key].add(week);
+
+      if (!daysByYearMonth[key]) daysByYearMonth[key] = new Set();
+      daysByYearMonth[key].add(day);
     }
 
     // Default current year if no records yet
@@ -66,17 +77,16 @@ export async function GET(request: NextRequest) {
     }
 
     const targetYear = parseInt(year);
-    // All 12 months for the year
-    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const months = Array.from(monthsByYear[targetYear] || []).sort((a, b) => a - b);
 
     if (!month) {
       return NextResponse.json({ years, months, weeks: [], days: [] });
     }
 
     const targetMonth = parseInt(month);
-    const numDays = new Date(targetYear, targetMonth, 0).getDate();
-    const days = Array.from({ length: numDays }, (_, i) => i + 1);
-    const weeks = [1, 2, 3, 4, 5];
+    const key = `${targetYear}-${targetMonth}`;
+    const weeks = Array.from(weeksByYearMonth[key] || []).sort((a, b) => a - b);
+    const days = Array.from(daysByYearMonth[key] || []).sort((a, b) => a - b);
 
     return NextResponse.json({ years, months, weeks, days });
   } catch {
