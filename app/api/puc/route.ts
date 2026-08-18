@@ -9,6 +9,7 @@ import {
   computeValidTill,
   validateVehicleNo,
   sanitizeVehicleNo,
+  parseISTDate,
   nowIST,
 } from '@/lib/pucHelpers';
 
@@ -50,9 +51,10 @@ export async function GET(request: NextRequest) {
         query = { validTill: { $gte: todayStart, $lte: todayEnd } };
       } else if (type === 'expired') {
         if (startDate && endDate) {
-          query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate) } };
+          const maxEnd = new Date(Math.min(new Date(endDate).getTime(), now.getTime()));
+          query = { validTill: { $gte: new Date(startDate), $lte: maxEnd } };
         } else {
-          query = { validTill: { $lt: todayEnd } };
+          query = { validTill: { $lt: now } };
         }
       } else if (type === 'old') {
         if (startDate && endDate) {
@@ -68,10 +70,16 @@ export async function GET(request: NextRequest) {
         PucRecord.countDocuments(query),
       ]);
 
-      const enriched = records.map((r) => ({
-        ...r,
-        status: new Date(r.validTill) < now ? 'expired' : 'active',
-      }));
+      const enriched = records.map((r) => {
+        const isExp =
+          new Date(r.validTill).getTime() <= now.getTime() ||
+          (type === 'today_expired' && new Date(r.validTill).getTime() <= todayEnd.getTime()) ||
+          type === 'expired';
+        return {
+          ...r,
+          status: isExp ? 'expired' : 'active',
+        };
+      });
 
       return NextResponse.json({ records: enriched, total, page, limit, dbConnected: true });
     }
@@ -93,12 +101,13 @@ export async function GET(request: NextRequest) {
       if (startDate && endDate) {
         const s = new Date(startDate);
         const e = new Date(endDate);
+        const maxE = new Date(Math.min(e.getTime(), now.getTime()));
         memoryList = memoryList.filter((r) => {
           const d = new Date(r.validTill);
-          return d >= s && d <= e;
+          return d >= s && d <= maxE;
         });
       } else {
-        memoryList = memoryList.filter((r) => new Date(r.validTill) < todayEnd);
+        memoryList = memoryList.filter((r) => new Date(r.validTill) < now);
       }
     } else if (type === 'old') {
       if (startDate && endDate) {
@@ -117,10 +126,16 @@ export async function GET(request: NextRequest) {
     }
 
     memoryList.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
-    const paginated = memoryList.slice(skip, skip + limit).map((r) => ({
-      ...r,
-      status: new Date(r.validTill) < now ? 'expired' : 'active',
-    }));
+    const paginated = memoryList.slice(skip, skip + limit).map((r) => {
+      const isExp =
+        new Date(r.validTill).getTime() <= now.getTime() ||
+        (type === 'today_expired' && new Date(r.validTill).getTime() <= todayEnd.getTime()) ||
+        type === 'expired';
+      return {
+        ...r,
+        status: isExp ? 'expired' : 'active',
+      };
+    });
 
     return NextResponse.json({
       records: paginated,
@@ -142,7 +157,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { vehicleNo, bsStage, fuelType, customerName, customerPhone, agent } = body;
+    const { vehicleNo, bsStage, fuelType, customerName, customerPhone, agent, issuedDate } = body;
 
     // Validation
     if (!vehicleNo || !bsStage || !fuelType || !customerName || !customerPhone) {
@@ -162,8 +177,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Phone number must be exactly 10 digits' }, { status: 400 });
     }
 
-    const issuedAt = nowIST();
+    let issuedAt: Date;
+    if (issuedDate) {
+      const parsed = parseISTDate(issuedDate);
+      issuedAt = parsed || new Date(issuedDate);
+    } else {
+      issuedAt = nowIST();
+    }
+
+    if (isNaN(issuedAt.getTime())) {
+      issuedAt = nowIST();
+    }
+
     const validTill = computeValidTill(issuedAt, bsStage);
+    const now = nowIST();
+    const status = validTill.getTime() < now.getTime() ? 'expired' : 'active';
 
     const recordData = {
       _id: `mem_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -175,10 +203,10 @@ export async function POST(request: NextRequest) {
       agent: agent?.trim() || null,
       issuedAt,
       validTill,
-      status: 'active',
+      status,
       source: 'manual',
-      createdAt: issuedAt,
-      updatedAt: issuedAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
     const conn = await dbConnect();
@@ -195,7 +223,7 @@ export async function POST(request: NextRequest) {
           agent: agent?.trim() || null,
           issuedAt,
           validTill,
-          status: 'active',
+          status,
           source: 'manual',
         });
         const docObj = doc.toObject();
@@ -217,6 +245,51 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ record: savedRecord }, { status: 201 });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Error creating record';
+    return NextResponse.json({ error: errorMsg }, { status: 500 });
+  }
+}
+
+// DELETE /api/puc - delete a record by ID
+export async function DELETE(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  let id = searchParams.get('id');
+
+  if (!id) {
+    try {
+      const body = await request.json();
+      id = body?.id;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!id) {
+    return NextResponse.json({ error: 'Record ID is required' }, { status: 400 });
+  }
+
+  try {
+    const conn = await dbConnect();
+    if (conn) {
+      try {
+        await PucRecord.findByIdAndDelete(id);
+      } catch (err) {
+        console.warn('Could not delete by direct ObjectId, trying string query:', err);
+        await PucRecord.deleteOne({ _id: id });
+      }
+    }
+
+    if (global.__inMemoryPucRecords) {
+      global.__inMemoryPucRecords = global.__inMemoryPucRecords.filter(
+        (r) => r._id?.toString() !== id
+      );
+    }
+
+    return NextResponse.json({ success: true, message: 'Record deleted successfully' });
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Failed to delete record';
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
