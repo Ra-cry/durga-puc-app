@@ -23,7 +23,7 @@ export default function DashboardPage() {
   const fetchToday = useCallback(async () => {
     setLoadingToday(true);
     try {
-      const res = await fetch('/api/puc?type=today&limit=200');
+      const res = await fetch('/api/puc?type=today&limit=1000');
       const data = await res.json();
       setTodayRecords(data.records || []);
       setTodayCount(data.total || 0);
@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const fetchExpiredToday = useCallback(async () => {
     setLoadingExpired(true);
     try {
-      const res = await fetch('/api/puc?type=today_expired&limit=200');
+      const res = await fetch('/api/puc?type=today_expired&limit=1000');
       const data = await res.json();
       setExpiredToday(data.records || []);
       setExpiredCount(data.total || 0);
