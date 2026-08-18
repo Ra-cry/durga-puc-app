@@ -15,10 +15,19 @@ const WEEK_LABELS: Record<number, string> = {
   5: 'Week 5 (29–31)',
 };
 
+export interface FilterParams {
+  startDate?: string;
+  endDate?: string;
+  year?: string;
+  month?: string;
+  week?: string;
+  day?: string;
+}
+
 interface FilterBarProps {
   type: 'old' | 'expired';
-  onFilterChange: (params: { startDate?: string; endDate?: string }) => void;
-  onExport: (params: { startDate?: string; endDate?: string }) => void;
+  onFilterChange: (params: FilterParams) => void;
+  onExport: (params: FilterParams) => void;
   exporting?: boolean;
 }
 
@@ -26,10 +35,12 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
   const [years, setYears] = useState<number[]>([]);
   const [months, setMonths] = useState<number[]>([]);
   const [weeks, setWeeks] = useState<number[]>([]);
+  const [days, setDays] = useState<number[]>([]);
 
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedWeek, setSelectedWeek] = useState('');
+  const [selectedDay, setSelectedDay] = useState('');
   const [loadingMeta, setLoadingMeta] = useState(false);
 
   // Fetch years on mount
@@ -39,9 +50,9 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       try {
         const res = await fetch(`/api/puc/meta?type=${type}`);
         const data = await res.json();
-        setYears(data.years || []);
+        setYears(data.years || [new Date().getFullYear()]);
       } catch {
-        console.error('Failed to fetch years');
+        setYears([new Date().getFullYear()]);
       } finally {
         setLoadingMeta(false);
       }
@@ -54,64 +65,106 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
     if (!selectedYear) {
       setMonths([]);
       setWeeks([]);
+      setDays([]);
       setSelectedMonth('');
       setSelectedWeek('');
+      setSelectedDay('');
       return;
     }
     const fetchMonths = async () => {
       try {
         const res = await fetch(`/api/puc/meta?type=${type}&year=${selectedYear}`);
         const data = await res.json();
-        setMonths(data.months || []);
+        setMonths(data.months || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         setSelectedMonth('');
         setSelectedWeek('');
+        setSelectedDay('');
         setWeeks([]);
+        setDays([]);
       } catch {
-        console.error('Failed to fetch months');
+        setMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
       }
     };
     fetchMonths();
   }, [selectedYear, type]);
 
-  // Fetch weeks when month changes
+  // Fetch weeks & days when month changes
   useEffect(() => {
     if (!selectedYear || !selectedMonth) {
       setWeeks([]);
+      setDays([]);
       setSelectedWeek('');
+      setSelectedDay('');
       return;
     }
-    const fetchWeeks = async () => {
+    const fetchWeeksAndDays = async () => {
       try {
-        const res = await fetch(`/api/puc/meta?type=${type}&year=${selectedYear}&month=${selectedMonth}`);
+        const res = await fetch(
+          `/api/puc/meta?type=${type}&year=${selectedYear}&month=${selectedMonth}`
+        );
         const data = await res.json();
-        setWeeks(data.weeks || []);
+        setWeeks(data.weeks || [1, 2, 3, 4, 5]);
+
+        const y = parseInt(selectedYear);
+        const m = parseInt(selectedMonth);
+        const numDays = new Date(y, m, 0).getDate();
+        const availableDays =
+          data.days && data.days.length > 0
+            ? data.days
+            : Array.from({ length: numDays }, (_, i) => i + 1);
+        setDays(availableDays);
         setSelectedWeek('');
+        setSelectedDay('');
       } catch {
-        console.error('Failed to fetch weeks');
+        setWeeks([1, 2, 3, 4, 5]);
+        setDays(Array.from({ length: 31 }, (_, i) => i + 1));
       }
     };
-    fetchWeeks();
+    fetchWeeksAndDays();
   }, [selectedYear, selectedMonth, type]);
 
-  const getDateRange = useCallback((): { startDate?: string; endDate?: string } => {
+  const getDateRange = useCallback((): FilterParams => {
     if (!selectedYear) return {};
 
     const y = parseInt(selectedYear);
 
+    // Specific Day chosen
+    if (selectedMonth && selectedDay) {
+      const m = parseInt(selectedMonth);
+      const d = parseInt(selectedDay);
+      const start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+      const startIST = new Date(start.getTime() - 330 * 60 * 1000);
+      const end = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999));
+      const endIST = new Date(end.getTime() - 330 * 60 * 1000);
+      return {
+        startDate: startIST.toISOString(),
+        endDate: endIST.toISOString(),
+        year: selectedYear,
+        month: selectedMonth,
+        day: selectedDay,
+      };
+    }
+
+    // Week chosen
     if (selectedMonth && selectedWeek) {
       const m = parseInt(selectedMonth);
       const w = parseInt(selectedWeek);
-      // Week 1: days 1-7, Week 2: 8-14, etc.
       const startDay = (w - 1) * 7 + 1;
       const endDay = Math.min(w * 7, new Date(y, m, 0).getDate());
       const start = new Date(Date.UTC(y, m - 1, startDay, 0, 0, 0));
-      // Adjust for IST offset (+5:30 = -330 min)
       const startIST = new Date(start.getTime() - 330 * 60 * 1000);
       const end = new Date(Date.UTC(y, m - 1, endDay, 23, 59, 59, 999));
       const endIST = new Date(end.getTime() - 330 * 60 * 1000);
-      return { startDate: startIST.toISOString(), endDate: endIST.toISOString() };
+      return {
+        startDate: startIST.toISOString(),
+        endDate: endIST.toISOString(),
+        year: selectedYear,
+        month: selectedMonth,
+        week: selectedWeek,
+      };
     }
 
+    // Month chosen
     if (selectedMonth) {
       const m = parseInt(selectedMonth);
       const lastDay = new Date(y, m, 0).getDate();
@@ -119,7 +172,12 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       const startIST = new Date(start.getTime() - 330 * 60 * 1000);
       const end = new Date(Date.UTC(y, m - 1, lastDay, 23, 59, 59, 999));
       const endIST = new Date(end.getTime() - 330 * 60 * 1000);
-      return { startDate: startIST.toISOString(), endDate: endIST.toISOString() };
+      return {
+        startDate: startIST.toISOString(),
+        endDate: endIST.toISOString(),
+        year: selectedYear,
+        month: selectedMonth,
+      };
     }
 
     // Year only
@@ -127,8 +185,12 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
     const startIST = new Date(start.getTime() - 330 * 60 * 1000);
     const end = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
     const endIST = new Date(end.getTime() - 330 * 60 * 1000);
-    return { startDate: startIST.toISOString(), endDate: endIST.toISOString() };
-  }, [selectedYear, selectedMonth, selectedWeek]);
+    return {
+      startDate: startIST.toISOString(),
+      endDate: endIST.toISOString(),
+      year: selectedYear,
+    };
+  }, [selectedYear, selectedMonth, selectedWeek, selectedDay]);
 
   const handleSearch = () => {
     const range = getDateRange();
@@ -144,8 +206,10 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
     setSelectedYear('');
     setSelectedMonth('');
     setSelectedWeek('');
+    setSelectedDay('');
     setMonths([]);
     setWeeks([]);
+    setDays([]);
     onFilterChange({});
   };
 
@@ -155,7 +219,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       style={{ background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(51,65,85,0.4)' }}
     >
       {/* Year */}
-      <div style={{ minWidth: 130 }}>
+      <div style={{ minWidth: 120 }}>
         <label className="form-label" htmlFor="filter-year">
           Year
         </label>
@@ -163,7 +227,12 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           id="filter-year"
           className="select-field"
           value={selectedYear}
-          onChange={(e) => setSelectedYear(e.target.value)}
+          onChange={(e) => {
+            setSelectedYear(e.target.value);
+            setSelectedMonth('');
+            setSelectedWeek('');
+            setSelectedDay('');
+          }}
           disabled={loadingMeta}
         >
           <option value="">All Years</option>
@@ -176,7 +245,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       </div>
 
       {/* Month */}
-      <div style={{ minWidth: 150 }}>
+      <div style={{ minWidth: 140 }}>
         <label className="form-label" htmlFor="filter-month">
           Month
         </label>
@@ -184,7 +253,11 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           id="filter-month"
           className="select-field"
           value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
+          onChange={(e) => {
+            setSelectedMonth(e.target.value);
+            setSelectedWeek('');
+            setSelectedDay('');
+          }}
           disabled={!selectedYear || months.length === 0}
         >
           <option value="">All Months</option>
@@ -197,21 +270,48 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       </div>
 
       {/* Week */}
-      <div style={{ minWidth: 160 }}>
+      <div style={{ minWidth: 150 }}>
         <label className="form-label" htmlFor="filter-week">
-          Week / Range
+          Week
         </label>
         <select
           id="filter-week"
           className="select-field"
           value={selectedWeek}
-          onChange={(e) => setSelectedWeek(e.target.value)}
-          disabled={!selectedMonth || weeks.length === 0}
+          onChange={(e) => {
+            setSelectedWeek(e.target.value);
+            if (e.target.value) setSelectedDay('');
+          }}
+          disabled={!selectedMonth || weeks.length === 0 || !!selectedDay}
         >
           <option value="">Full Month</option>
           {weeks.map((w) => (
             <option key={w} value={w}>
               {WEEK_LABELS[w] || `Week ${w}`}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Day */}
+      <div style={{ minWidth: 110 }}>
+        <label className="form-label" htmlFor="filter-day">
+          Day
+        </label>
+        <select
+          id="filter-day"
+          className="select-field"
+          value={selectedDay}
+          onChange={(e) => {
+            setSelectedDay(e.target.value);
+            if (e.target.value) setSelectedWeek('');
+          }}
+          disabled={!selectedMonth || days.length === 0 || !!selectedWeek}
+        >
+          <option value="">All Days</option>
+          {days.map((d) => (
+            <option key={d} value={d}>
+              Day {d}
             </option>
           ))}
         </select>
