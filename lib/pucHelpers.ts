@@ -1,5 +1,5 @@
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
-import { addMonths, startOfDay, endOfDay } from 'date-fns';
+import { addMonths, subDays, startOfDay, endOfDay } from 'date-fns';
 
 export const IST = 'Asia/Kolkata';
 
@@ -67,10 +67,10 @@ export function getWeekOfMonth(date: Date): number {
   return Math.ceil(dayOfMonth / 7);
 }
 
-/** Compute validTill date based on bsStage */
+/** Compute validTill date based on bsStage (6 months - 1 day for BS1..BS4, 12 months - 1 day for BS6) */
 export function computeValidTill(issuedAt: Date, bsStage: string): Date {
   const months = bsStage === 'BS6' ? 12 : 6;
-  return addMonths(issuedAt, months);
+  return subDays(addMonths(issuedAt, months), 1);
 }
 
 /** Format a Date to IST string for display */

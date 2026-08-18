@@ -42,41 +42,86 @@ interface FilterBarProps {
 
 export default function FilterBar({ type, onFilterChange, onExport, exporting }: FilterBarProps) {
   const [years, setYears] = useState<number[]>([]);
+  const [availableMonths, setAvailableMonths] = useState<number[]>([]);
+  const [availableDays, setAvailableDays] = useState<number[]>([]);
+
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedWeek, setSelectedWeek] = useState('');
   const [selectedDay, setSelectedDay] = useState('');
   const [loadingMeta, setLoadingMeta] = useState(false);
 
-  // Fetch years from meta or fallback to standard year list
+  // Fetch available years from DB for this section
   useEffect(() => {
+    let isMounted = true;
     const fetchYears = async () => {
       setLoadingMeta(true);
       try {
         const res = await fetch(`/api/puc/meta?type=${type}`);
         const data = await res.json();
-        const serverYears: number[] = data.years || [];
-        const currentY = new Date().getFullYear();
-        // Combine server years with range from 2024 to current + 3
-        const yearSet = new Set<number>([
-          ...serverYears,
-          2024,
-          2025,
-          2026,
-          2027,
-          currentY,
-        ]);
-        const sorted = Array.from(yearSet).sort((a, b) => b - a);
-        setYears(sorted);
+        if (isMounted) {
+          setYears(data.years || []);
+        }
       } catch {
-        const currentY = new Date().getFullYear();
-        setYears([2027, 2026, 2025, 2024, currentY].sort((a, b) => b - a));
+        if (isMounted) setYears([]);
       } finally {
-        setLoadingMeta(false);
+        if (isMounted) setLoadingMeta(false);
       }
     };
     fetchYears();
+    return () => {
+      isMounted = false;
+    };
   }, [type]);
+
+  // Fetch available months when year changes
+  useEffect(() => {
+    if (!selectedYear) {
+      setAvailableMonths([]);
+      setAvailableDays([]);
+      return;
+    }
+    let isMounted = true;
+    const fetchMonths = async () => {
+      try {
+        const res = await fetch(`/api/puc/meta?type=${type}&year=${selectedYear}`);
+        const data = await res.json();
+        if (isMounted) {
+          setAvailableMonths(data.months || []);
+        }
+      } catch {
+        if (isMounted) setAvailableMonths([]);
+      }
+    };
+    fetchMonths();
+    return () => {
+      isMounted = false;
+    };
+  }, [type, selectedYear]);
+
+  // Fetch available days when month changes
+  useEffect(() => {
+    if (!selectedYear || !selectedMonth) {
+      setAvailableDays([]);
+      return;
+    }
+    let isMounted = true;
+    const fetchDays = async () => {
+      try {
+        const res = await fetch(`/api/puc/meta?type=${type}&year=${selectedYear}&month=${selectedMonth}`);
+        const data = await res.json();
+        if (isMounted) {
+          setAvailableDays(data.days || []);
+        }
+      } catch {
+        if (isMounted) setAvailableDays([]);
+      }
+    };
+    fetchDays();
+    return () => {
+      isMounted = false;
+    };
+  }, [type, selectedYear, selectedMonth]);
 
   // Dynamic Sunday-to-Saturday weeks for selected year & month
   const weeksList: SunSatWeek[] = useMemo(() => {
@@ -87,13 +132,15 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
     return getSunSatWeeksForMonth(y, m);
   }, [selectedYear, selectedMonth]);
 
-  // Dynamic days (1..31) for selected year & month
+  // Dynamic days for selected year & month
   const daysList: DayOption[] = useMemo(() => {
     if (!selectedYear || !selectedMonth) return [];
     const y = parseInt(selectedYear);
     const m = parseInt(selectedMonth);
     if (isNaN(y) || isNaN(m)) return [];
-    return getDaysForMonth(y, m);
+    const allDays = getDaysForMonth(y, m);
+    // If availableDays is present and not empty, highlight or offer all days of that month
+    return allDays;
   }, [selectedYear, selectedMonth]);
 
   const getDateRange = useCallback((): FilterParams => {
@@ -104,16 +151,6 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
     // Specific Day chosen
     if (selectedMonth && selectedDay) {
       const dNum = parseInt(selectedDay);
-      const matchedDay = daysList.find((d) => d.day === dNum);
-      if (matchedDay) {
-        return {
-          startDate: matchedDay.startDateIST,
-          endDate: matchedDay.endDateIST,
-          year: selectedYear,
-          month: selectedMonth,
-          day: selectedDay,
-        };
-      }
       const m = parseInt(selectedMonth);
       const start = new Date(Date.UTC(y, m - 1, dNum, 0, 0, 0) - 330 * 60 * 1000);
       const end = new Date(Date.UTC(y, m - 1, dNum, 23, 59, 59, 999) - 330 * 60 * 1000);
@@ -163,7 +200,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
       endDate: end.toISOString(),
       year: selectedYear,
     };
-  }, [selectedYear, selectedMonth, selectedWeek, selectedDay, weeksList, daysList]);
+  }, [selectedYear, selectedMonth, selectedWeek, selectedDay, weeksList]);
 
   const handleSearch = () => {
     const range = getDateRange();
@@ -205,7 +242,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           }}
           disabled={loadingMeta}
         >
-          <option value="">All Years</option>
+          <option value="">{years.length === 0 ? 'No Data Available' : 'Select Year'}</option>
           {years.map((y) => (
             <option key={y} value={y}>
               {y}
@@ -228,10 +265,10 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
             setSelectedWeek('');
             setSelectedDay('');
           }}
-          disabled={!selectedYear}
+          disabled={!selectedYear || availableMonths.length === 0}
         >
-          <option value="">All Months</option>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
+          <option value="">{availableMonths.length === 0 ? (selectedYear ? 'No Months' : 'All Months') : 'All Months'}</option>
+          {availableMonths.map((m) => (
             <option key={m} value={m}>
               {MONTH_NAMES[m]}
             </option>
@@ -250,9 +287,11 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           value={selectedWeek}
           onChange={(e) => {
             setSelectedWeek(e.target.value);
-            if (e.target.value) setSelectedDay('');
+            if (e.target.value) {
+              setSelectedDay('');
+            }
           }}
-          disabled={!selectedMonth || weeksList.length === 0 || !!selectedDay}
+          disabled={!selectedMonth || weeksList.length === 0}
         >
           <option value="">Full Month</option>
           {weeksList.map((w) => (
@@ -274,22 +313,27 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           value={selectedDay}
           onChange={(e) => {
             setSelectedDay(e.target.value);
-            if (e.target.value) setSelectedWeek('');
+            if (e.target.value) {
+              setSelectedWeek('');
+            }
           }}
-          disabled={!selectedMonth || daysList.length === 0 || !!selectedWeek}
+          disabled={!selectedMonth || daysList.length === 0}
         >
           <option value="">All Days</option>
-          {daysList.map((d) => (
-            <option key={d.day} value={d.day}>
-              {d.label}
-            </option>
-          ))}
+          {daysList.map((d) => {
+            const hasData = availableDays.includes(d.day);
+            return (
+              <option key={d.day} value={d.day}>
+                {d.label} {hasData ? '•' : ''}
+              </option>
+            );
+          })}
         </select>
       </div>
 
       {/* Buttons */}
       <div className="flex flex-wrap gap-2 pb-0.5 items-center">
-        <button id="filter-search" className="btn-primary" onClick={handleSearch}>
+        <button id="filter-search" className="btn-primary" onClick={handleSearch} disabled={!selectedYear}>
           <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
             <path
               fillRule="evenodd"
@@ -313,7 +357,7 @@ export default function FilterBar({ type, onFilterChange, onExport, exporting }:
           id="filter-export"
           className="btn-success"
           onClick={handleExport}
-          disabled={exporting}
+          disabled={exporting || !selectedYear}
         >
           {exporting ? (
             <>

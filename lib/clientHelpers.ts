@@ -54,6 +54,7 @@ export function computeValidTillClient(issuedAt: Date, bsStage: string): Date {
   const d = new Date(issuedAt);
   const months = bsStage === 'BS6' ? 12 : 6;
   d.setMonth(d.getMonth() + months);
+  d.setDate(d.getDate() - 1);
   return d;
 }
 
