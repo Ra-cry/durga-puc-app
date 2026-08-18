@@ -205,5 +205,5 @@ export function getDaysForMonth(year: number, month: number): DayOption[] {
 /** Indian vehicle number validation */
 export function validateVehicleNo(vehicleNo: string): boolean {
   const sanitized = sanitizeVehicleNo(vehicleNo);
-  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(sanitized);
+  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/.test(sanitized);
 }

@@ -23,7 +23,7 @@ const PucRecordSchema = new Schema<IPucRecord>(
       required: true,
       trim: true,
       uppercase: true,
-      match: [/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/, 'Invalid vehicle number format'],
+      match: [/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/, 'Invalid vehicle number format'],
     },
     vehicleClass: {
       type: String,

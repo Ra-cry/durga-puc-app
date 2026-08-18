@@ -83,8 +83,8 @@ export function formatISTDateTime(date: Date): string {
   return format(toZonedTime(date, IST), 'dd-MM-yyyy HH:mm:ss', { timeZone: IST });
 }
 
-/** Indian vehicle number validation regex */
-export const VEHICLE_NO_REGEX = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/;
+/** Indian vehicle number validation regex — relaxed to allow 3-5 trailing digits */
+export const VEHICLE_NO_REGEX = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/;
 
 /** Sanitize vehicle number */
 export function sanitizeVehicleNo(vehicleNo: string): string {
