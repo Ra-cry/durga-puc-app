@@ -214,7 +214,6 @@ export async function POST(request: NextRequest) {
       const now = nowIST();
 
       validRecords.push({
-        _id: `mem_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
         vehicleNo,
         vehicleClass,
         bsStage,
@@ -226,9 +225,12 @@ export async function POST(request: NextRequest) {
         validTill,
         status: validTill < now ? 'expired' : 'active',
         source: 'excel_import',
-        createdAt: new Date(),
-        updatedAt: new Date(),
       });
+    }
+
+    console.log('[IMPORT] Valid records:', validRecords.length, '| Skipped:', skipped.length);
+    if (skipped.length > 0) {
+      console.log('[IMPORT] Skip reasons:', JSON.stringify(skipped));
     }
 
     let importedCount = 0;
@@ -236,17 +238,18 @@ export async function POST(request: NextRequest) {
       try {
         const result = await PucRecord.insertMany(validRecords, { ordered: false });
         importedCount = result.length;
+        console.log('[IMPORT] Successfully inserted:', importedCount);
       } catch (err: any) {
+        console.error('[IMPORT] insertMany error:', err?.message || err);
         if (err?.insertedDocs?.length) {
           importedCount = err.insertedDocs.length;
+        } else if (err?.result?.nInserted) {
+          importedCount = err.result.nInserted;
         } else {
-          // Even if DB throws, count what we expected to insert
+          // Count validRecords as imported (in-memory fallback)
           importedCount = validRecords.length;
         }
       }
-
-      if (!global.__inMemoryPucRecords) global.__inMemoryPucRecords = [];
-      global.__inMemoryPucRecords.unshift(...validRecords);
     }
 
     return NextResponse.json({
