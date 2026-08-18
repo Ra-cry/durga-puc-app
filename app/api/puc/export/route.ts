@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       if (type === 'expired') {
         sortQuery = { validTill: -1 };
         if (startDate && endDate) {
-          query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate), $lt: now } };
+          query = { validTill: { $gte: new Date(startDate), $lte: new Date(endDate) } };
         } else {
           query = { validTill: { $lt: now } };
         }
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
           const e = new Date(endDate);
           records = memoryList.filter((r) => {
             const d = new Date(r.validTill);
-            return d >= s && d <= e && d < now;
+            return d >= s && d <= e;
           });
         } else {
           records = memoryList.filter((r) => new Date(r.validTill) < now);

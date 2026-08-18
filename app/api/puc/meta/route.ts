@@ -4,99 +4,118 @@ import { authOptions } from '@/lib/auth';
 import dbConnect from '@/lib/dbConnect';
 import PucRecord from '@/models/PucRecord';
 import { toZonedTime } from 'date-fns-tz';
-import { IST, nowIST } from '@/lib/pucHelpers';
+import { IST } from '@/lib/pucHelpers';
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const year = searchParams.get('year');
-  const month = searchParams.get('month');
+  const yearParam = searchParams.get('year');
+  const monthParam = searchParams.get('month');
   const type = searchParams.get('type') || 'old'; // 'old' | 'expired'
 
   try {
     const conn = await dbConnect();
     const dateField = type === 'expired' ? 'validTill' : 'issuedAt';
-    const now = nowIST();
-
-    let allDocs: any[] = [];
-    if (conn) {
-      const matchQuery: Record<string, unknown> = {};
-      if (type === 'expired') {
-        matchQuery.validTill = { $lt: now };
-      }
-      allDocs = await PucRecord.find(matchQuery, { [dateField]: 1 }).lean();
-    } else {
-      let memoryList = global.__inMemoryPucRecords || [];
-      if (type === 'expired') {
-        memoryList = memoryList.filter((r) => new Date(r.validTill) < now);
-      }
-      allDocs = memoryList;
-    }
 
     const yearSet = new Set<number>();
     const monthsByYear: Record<number, Set<number>> = {};
-    const weeksByYearMonth: Record<string, Set<number>> = {};
     const daysByYearMonth: Record<string, Set<number>> = {};
 
-    for (const doc of allDocs) {
-      const rawDate = doc[dateField as keyof typeof doc] as Date | string;
-      if (!rawDate) continue;
-      const d = toZonedTime(new Date(rawDate), IST);
-      if (isNaN(d.getTime())) continue;
+    if (conn) {
+      const results = await PucRecord.aggregate([
+        {
+          $match: {
+            [dateField]: { $ne: null, $exists: true },
+          },
+        },
+        {
+          $project: {
+            year: { $year: { date: `$${dateField}`, timezone: 'Asia/Kolkata' } },
+            month: { $month: { date: `$${dateField}`, timezone: 'Asia/Kolkata' } },
+            day: { $dayOfMonth: { date: `$${dateField}`, timezone: 'Asia/Kolkata' } },
+          },
+        },
+        {
+          $group: {
+            _id: { year: '$year', month: '$month', day: '$day' },
+          },
+        },
+      ]);
 
-      const y = d.getFullYear();
-      const m = d.getMonth() + 1;
-      const day = d.getDate();
-      const week = Math.ceil(day / 7);
+      for (const item of results) {
+        const y = item._id.year;
+        const m = item._id.month;
+        const d = item._id.day;
+        if (!y || !m || !d) continue;
 
-      yearSet.add(y);
-      if (!monthsByYear[y]) monthsByYear[y] = new Set();
-      monthsByYear[y].add(m);
+        yearSet.add(y);
+        if (!monthsByYear[y]) monthsByYear[y] = new Set();
+        monthsByYear[y].add(m);
 
-      const key = `${y}-${m}`;
-      if (!weeksByYearMonth[key]) weeksByYearMonth[key] = new Set();
-      weeksByYearMonth[key].add(week);
+        const key = `${y}-${m}`;
+        if (!daysByYearMonth[key]) daysByYearMonth[key] = new Set();
+        daysByYearMonth[key].add(d);
+      }
+    } else {
+      const memoryList = global.__inMemoryPucRecords || [];
+      for (const doc of memoryList) {
+        const rawDate = doc[dateField as keyof typeof doc] as Date | string;
+        if (!rawDate) continue;
+        const d = toZonedTime(new Date(rawDate), IST);
+        if (isNaN(d.getTime())) continue;
 
-      if (!daysByYearMonth[key]) daysByYearMonth[key] = new Set();
-      daysByYearMonth[key].add(day);
+        const y = d.getFullYear();
+        const m = d.getMonth() + 1;
+        const day = d.getDate();
+
+        yearSet.add(y);
+        if (!monthsByYear[y]) monthsByYear[y] = new Set();
+        monthsByYear[y].add(m);
+
+        const key = `${y}-${m}`;
+        if (!daysByYearMonth[key]) daysByYearMonth[key] = new Set();
+        daysByYearMonth[key].add(day);
+      }
     }
-
-    // Combine discovered years with standard active range
-    const currentY = new Date().getFullYear();
-    yearSet.add(currentY);
-    yearSet.add(2024);
-    yearSet.add(2025);
-    yearSet.add(2026);
-    yearSet.add(2027);
 
     const years = Array.from(yearSet).sort((a, b) => b - a);
 
-    if (!year) {
-      return NextResponse.json({ years, months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], weeks: [], days: [] });
+    if (!yearParam) {
+      return NextResponse.json({
+        years,
+        months: [],
+        days: [],
+      });
     }
 
-    const targetYear = parseInt(year);
-    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const targetYear = parseInt(yearParam);
+    const months = Array.from(monthsByYear[targetYear] || []).sort((a, b) => a - b);
 
-    if (!month) {
-      return NextResponse.json({ years, months, weeks: [], days: [] });
+    if (!monthParam) {
+      return NextResponse.json({
+        years,
+        months,
+        days: [],
+      });
     }
 
-    const targetMonth = parseInt(month);
+    const targetMonth = parseInt(monthParam);
     const key = `${targetYear}-${targetMonth}`;
-    const weeks = Array.from(weeksByYearMonth[key] || []).sort((a, b) => a - b);
     const days = Array.from(daysByYearMonth[key] || []).sort((a, b) => a - b);
 
-    return NextResponse.json({ years, months, weeks, days });
-  } catch {
     return NextResponse.json({
-      years: [2027, 2026, 2025, 2024],
-      months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-      weeks: [],
+      years,
+      months,
+      days,
+    });
+  } catch (err: any) {
+    console.error('Meta fetch error:', err);
+    return NextResponse.json({
+      years: [],
+      months: [],
       days: [],
     });
   }
 }
-

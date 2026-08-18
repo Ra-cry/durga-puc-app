@@ -58,7 +58,6 @@ export async function GET(request: NextRequest) {
             validTill: {
               $gte: new Date(startDate),
               $lte: new Date(endDate),
-              $lt: now,
             },
           };
         } else {
@@ -96,7 +95,7 @@ export async function GET(request: NextRequest) {
         const isExp =
           new Date(r.validTill).getTime() <= now.getTime() ||
           (type === 'today_expired' && new Date(r.validTill).getTime() <= todayEnd.getTime()) ||
-          type === 'expired';
+          (type === 'expired' && !startDate);
         return {
           ...r,
           vehicleClass: r.vehicleClass || 'CAR',
@@ -128,7 +127,7 @@ export async function GET(request: NextRequest) {
         const e = new Date(endDate);
         memoryList = memoryList.filter((r) => {
           const d = new Date(r.validTill);
-          return d >= s && d <= e && d < now;
+          return d >= s && d <= e;
         });
       } else {
         memoryList = memoryList.filter((r) => new Date(r.validTill) < now);
@@ -174,7 +173,7 @@ export async function GET(request: NextRequest) {
       const isExp =
         new Date(r.validTill).getTime() <= now.getTime() ||
         (type === 'today_expired' && new Date(r.validTill).getTime() <= todayEnd.getTime()) ||
-        type === 'expired';
+        (type === 'expired' && !startDate);
       return {
         ...r,
         vehicleClass: r.vehicleClass || 'CAR',
