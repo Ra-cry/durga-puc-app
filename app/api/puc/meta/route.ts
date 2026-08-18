@@ -16,21 +16,27 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get('type') || 'old'; // 'old' | 'expired'
 
   try {
-    await dbConnect();
-
+    const conn = await dbConnect();
     const dateField = type === 'expired' ? 'validTill' : 'issuedAt';
 
-    // Get distinct years
-    const allDocs = await PucRecord.find({}, { [dateField]: 1 }).lean();
+    let allDocs: any[] = [];
+    if (conn) {
+      allDocs = await PucRecord.find({}, { [dateField]: 1 }).lean();
+    } else {
+      allDocs = global.__inMemoryPucRecords || [];
+    }
 
     const yearSet = new Set<number>();
     const monthsByYear: Record<number, Set<number>> = {};
     const weeksByYearMonth: Record<string, Set<number>> = {};
+    const daysByYearMonth: Record<string, Set<number>> = {};
 
     for (const doc of allDocs) {
-      const rawDate = doc[dateField as keyof typeof doc] as Date;
+      const rawDate = doc[dateField as keyof typeof doc] as Date | string;
       if (!rawDate) continue;
       const d = toZonedTime(new Date(rawDate), IST);
+      if (isNaN(d.getTime())) continue;
+
       const y = d.getFullYear();
       const m = d.getMonth() + 1;
       const day = d.getDate();
@@ -43,25 +49,44 @@ export async function GET(request: NextRequest) {
       const key = `${y}-${m}`;
       if (!weeksByYearMonth[key]) weeksByYearMonth[key] = new Set();
       weeksByYearMonth[key].add(week);
+
+      if (!daysByYearMonth[key]) daysByYearMonth[key] = new Set();
+      daysByYearMonth[key].add(day);
+    }
+
+    // Default current year if no records yet
+    if (yearSet.size === 0) {
+      const currentY = new Date().getFullYear();
+      yearSet.add(currentY);
+      monthsByYear[currentY] = new Set([new Date().getMonth() + 1]);
     }
 
     const years = Array.from(yearSet).sort((a, b) => b - a);
 
     if (!year) {
-      return NextResponse.json({ years });
+      return NextResponse.json({ years, months: [], weeks: [], days: [] });
     }
 
-    const months = Array.from(monthsByYear[parseInt(year)] || []).sort((a, b) => a - b);
+    const targetYear = parseInt(year);
+    const months = Array.from(monthsByYear[targetYear] || []).sort((a, b) => a - b);
 
     if (!month) {
-      return NextResponse.json({ years, months });
+      return NextResponse.json({ years, months, weeks: [], days: [] });
     }
 
-    const key = `${year}-${month}`;
+    const targetMonth = parseInt(month);
+    const key = `${targetYear}-${targetMonth}`;
     const weeks = Array.from(weeksByYearMonth[key] || []).sort((a, b) => a - b);
+    
+    // Provide available days, fallback to 1..daysInMonth if empty
+    let days = Array.from(daysByYearMonth[key] || []).sort((a, b) => a - b);
+    if (days.length === 0) {
+      const numDays = new Date(targetYear, targetMonth, 0).getDate();
+      days = Array.from({ length: numDays }, (_, i) => i + 1);
+    }
 
-    return NextResponse.json({ years, months, weeks });
-  } catch (err) {
-    return NextResponse.json({ years: [], months: [], weeks: [] });
+    return NextResponse.json({ years, months, weeks, days });
+  } catch {
+    return NextResponse.json({ years: [new Date().getFullYear()], months: [], weeks: [], days: [] });
   }
 }
