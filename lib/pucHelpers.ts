@@ -96,28 +96,73 @@ export function validateVehicleNo(vehicleNo: string): boolean {
   return VEHICLE_NO_REGEX.test(sanitizeVehicleNo(vehicleNo));
 }
 
-/** Parse dd-mm-yyyy or yyyy-mm-dd date string to a Date in IST */
-export function parseISTDate(dateStr: string): Date | null {
-  if (!dateStr) return null;
-  const parts = dateStr.trim().split(/[-/]/);
-  if (parts.length !== 3) return null;
-  
-  let year: number;
-  let month: number;
-  let day: number;
+/** Parse dd-mm-yyyy, yyyy-mm-dd, Excel serial number, or Date object to a Date in IST */
+export function parseISTDate(input: any): Date | null {
+  if (!input) return null;
 
-  if (parts[0].length === 4) {
-    // yyyy-mm-dd
-    [year, month, day] = parts.map(Number);
-  } else {
-    // dd-mm-yyyy
-    [day, month, year] = parts.map(Number);
+  // Handle JS Date object
+  if (input instanceof Date) {
+    if (isNaN(input.getTime())) return null;
+    const y = input.getUTCFullYear();
+    const m = input.getUTCMonth();
+    const d = input.getUTCDate();
+    const istDate = new Date(y, m, d, 12, 0, 0);
+    return fromZonedTime(istDate, IST);
   }
 
-  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
-  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900) return null;
-  const istDate = new Date(year, month - 1, day, 12, 0, 0); // use noon to prevent any midnight boundary issues
-  return fromZonedTime(istDate, IST);
+  // Handle Excel serial date numbers (e.g. 46252)
+  const num = typeof input === 'number' ? input : Number(String(input).trim());
+  if (!isNaN(num) && num > 1000 && num < 100000) {
+    // Excel base epoch is 1899-12-30 (25569 days to 1970-01-01)
+    const utcDays = Math.floor(num - 25569);
+    const utcValue = utcDays * 86400;
+    const dateInfo = new Date(utcValue * 1000);
+    if (!isNaN(dateInfo.getTime())) {
+      const year = dateInfo.getUTCFullYear();
+      const month = dateInfo.getUTCMonth();
+      const day = dateInfo.getUTCDate();
+      const istDate = new Date(year, month, day, 12, 0, 0);
+      return fromZonedTime(istDate, IST);
+    }
+  }
+
+  const str = String(input).trim();
+  if (!str) return null;
+
+  // Standard string date parsing (splits on -, /, .)
+  const parts = str.split(/[-/.]/);
+  if (parts.length === 3) {
+    let year: number;
+    let month: number;
+    let day: number;
+
+    if (parts[0].length === 4) {
+      // yyyy-mm-dd
+      [year, month, day] = parts.map(Number);
+    } else {
+      // dd-mm-yyyy
+      [day, month, year] = parts.map(Number);
+    }
+
+    if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1900) {
+        const istDate = new Date(year, month - 1, day, 12, 0, 0);
+        return fromZonedTime(istDate, IST);
+      }
+    }
+  }
+
+  // Fallback for Date.parse
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = parsed.getMonth();
+    const d = parsed.getDate();
+    const istDate = new Date(y, m, d, 12, 0, 0);
+    return fromZonedTime(istDate, IST);
+  }
+
+  return null;
 }
 
 /** Get current IST time components */
