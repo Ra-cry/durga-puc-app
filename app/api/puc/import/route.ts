@@ -10,29 +10,45 @@ import {
   nowIST,
 } from '@/lib/pucHelpers';
 
-// Relaxed vehicle number validation — handles real-world plates
-// Supports: AP37CH01069 (5 digits), AP09AB1234 (4 digits), etc.
-function validateVehicleNoRelaxed(vehicleNo: string): boolean {
-  const cleaned = (vehicleNo || '').replace(/[\s-]/g, '').toUpperCase();
-  // Standard: 2 letters + 1-2 digits + 1-3 letters + 3-5 digits
-  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/.test(cleaned);
+// Relaxed vehicle number — handles AP37CH01069 (5 digits), AP09AB1234 (4 digits), etc.
+function isValidVehicleNo(vno: string): boolean {
+  const s = (vno || '').replace(/[\s\-_.]/g, '').toUpperCase();
+  return /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,5}$/.test(s);
 }
 
-function getCol(row: Record<string, any>, ...keys: string[]): any {
+// Find value from a row using multiple possible column names (case-insensitive)
+function getField(row: Record<string, any>, ...keys: string[]): any {
   for (const key of keys) {
-    // Exact match first
-    if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
-    // Case-insensitive match
-    const lowerKey = key.toLowerCase();
-    for (const rowKey of Object.keys(row)) {
-      if (rowKey.toLowerCase().trim() === lowerKey) {
-        if (row[rowKey] !== undefined && row[rowKey] !== null && row[rowKey] !== '') {
-          return row[rowKey];
+    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
+      return row[key];
+    }
+    // Case-insensitive search
+    const keyLow = key.toLowerCase().trim().replace(/\s+/g, ' ');
+    for (const k of Object.keys(row)) {
+      if (k.toLowerCase().trim().replace(/\s+/g, ' ') === keyLow) {
+        if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+          return row[k];
         }
       }
     }
   }
   return undefined;
+}
+
+// Auto-detect header row index in raw 2D array
+function findHeaderRowIndex(rawRows: any[][]): number {
+  const headerKeywords = ['vehicle', 'bs', 'fuel', 'phone', 'date', 'class', 'issued'];
+  for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+    const row = rawRows[i];
+    if (!row || row.length === 0) continue;
+    const rowText = row.map((c: any) => String(c ?? '').toLowerCase());
+    let matches = 0;
+    for (const kw of headerKeywords) {
+      if (rowText.some((cell: string) => cell.includes(kw))) matches++;
+    }
+    if (matches >= 2) return i; // Found the header row
+  }
+  return 0; // Default to first row
 }
 
 export async function POST(request: NextRequest) {
@@ -50,86 +66,110 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = await file.arrayBuffer();
-    // cellDates: true converts Excel date serials to JS Date objects
-    // raw: false converts everything to strings (fallback)
+
+    // Read with cellDates for proper Excel date handling
     const workbook = read(buffer, { type: 'array', cellDates: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
-    // defval: '' ensures empty cells are included
-    const rows: Record<string, any>[] = utils.sheet_to_json(sheet, {
-      defval: '',
-      blankrows: false,
-    });
+    // Step 1: Read as raw 2D array to detect headers
+    const rawRows: any[][] = utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false });
 
-    if (rows.length === 0) {
+    if (rawRows.length === 0) {
       return NextResponse.json({
         imported: 0,
         skipped: 0,
-        skippedDetails: [],
-        warning: 'No rows found in the Excel file. Please check that your file has data rows below the header.',
+        skippedDetails: [{ row: 0, reason: 'Excel file appears to be empty. Please check the file.' }],
+      });
+    }
+
+    // Step 2: Auto-detect which row is the header
+    const headerRowIdx = findHeaderRowIndex(rawRows);
+    const headerRow = rawRows[headerRowIdx].map((h: any) =>
+      String(h ?? '').trim().replace(/\n/g, ' ').replace(/\s+/g, ' ')
+    );
+
+    // Step 3: Build rows as objects from detected header
+    const dataRows: Record<string, any>[] = [];
+    for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
+      const rawRow = rawRows[i];
+      if (!rawRow || rawRow.length === 0) continue;
+      // Skip row if all cells are empty
+      if (rawRow.every((c: any) => String(c ?? '').trim() === '')) continue;
+      const rowObj: Record<string, any> = {};
+      headerRow.forEach((colName, colIdx) => {
+        if (colName) rowObj[colName] = rawRow[colIdx] ?? '';
+      });
+      dataRows.push(rowObj);
+    }
+
+    if (dataRows.length === 0) {
+      return NextResponse.json({
+        imported: 0,
+        skipped: 0,
+        skippedDetails: [{ row: 0, reason: `No data rows found. Header detected at row ${headerRowIdx + 1}: [${headerRow.join(', ')}]` }],
       });
     }
 
     const validRecords: any[] = [];
     const skipped: Array<{ row: number; reason: string }> = [];
-
     const VALID_BS_STAGES = ['BS1', 'BS2', 'BS3', 'BS4', 'BS6'];
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rowNum = i + 2;
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      const rowNum = headerRowIdx + i + 2; // real Excel row number
 
-      // Skip totally empty rows
-      const rowValues = Object.values(row).map((v) => String(v).trim()).filter(Boolean);
-      if (rowValues.length === 0) continue;
-
-      // Extract all fields with flexible column name matching
-      const vehicleNoRaw = getCol(row,
-        'Vehicle No', 'VehicleNo', 'vehicle no', 'vehicleno', 'Vehicle Number', 'Veh No', 'Reg No'
+      // Extract fields
+      const vehicleNoRaw = getField(row,
+        'Vehicle No', 'VehicleNo', 'Veh No', 'Vehicle Number', 'Reg No', 'Registration No', 'vehicle no'
       );
       const vehicleNo = vehicleNoRaw
-        ? String(vehicleNoRaw).replace(/[\s-]/g, '').toUpperCase()
+        ? String(vehicleNoRaw).replace(/[\s\-_.]/g, '').toUpperCase()
         : '';
 
       const vehicleClass = String(
-        getCol(row, 'Class', 'Vehicle Class', 'VehicleClass', 'Veh Class') || 'CAR'
-      ).trim().toUpperCase();
+        getField(row, 'Class', 'Vehicle Class', 'VehicleClass', 'Veh Class') ?? 'CAR'
+      ).trim().toUpperCase() || 'CAR';
 
-      const bsStageRaw = getCol(row, 'BS Stage', 'BSStage', 'bs stage', 'bsstage', 'BS', 'Bs Stage');
+      const bsStageRaw = getField(row,
+        'BS Stage', 'BSStage', 'BS', 'Bs Stage', 'bs stage', 'bsstage', 'BS_Stage'
+      );
       const bsStage = bsStageRaw
         ? String(bsStageRaw).trim().toUpperCase().replace(/\s+/g, '')
         : '';
 
-      const rawFuel = getCol(row, 'Fuel', 'FuelType', 'Fuel Type', 'fuel', 'FUEL');
+      const rawFuel = getField(row, 'Fuel', 'FuelType', 'Fuel Type', 'fuel');
+
       const customerName = String(
-        getCol(row, 'Customer Name', 'CustomerName', 'Name', 'customer name') || '—'
-      ).trim();
-      const customerPhoneRaw = getCol(row,
-        'Customer Phone', 'CustomerPhone', 'Phone', 'Mobile', 'Mobile No', 'Phone No', 'customer phone'
+        getField(row, 'Customer Name', 'CustomerName', 'Name', 'Customer r Name') ?? '—'
+      ).trim() || '—';
+
+      const customerPhoneRaw = getField(row,
+        'Customer Phone', 'CustomerPhone', 'Phone', 'Mobile', 'Mobile No', 'Phone No',
+        'Customer\r\nPhone', 'Customer\nPhone', 'Custome r Phone'
       );
       const customerPhone = customerPhoneRaw
         ? String(customerPhoneRaw).replace(/\D/g, '')
         : '';
 
-      const agentRaw = getCol(row, 'Agent', 'agent', 'Agent Name');
+      const agentRaw = getField(row, 'Agent', 'agent', 'Agent Name');
       const agent = agentRaw ? String(agentRaw).trim() : null;
 
-      const issuedDateRaw = getCol(row,
-        'Issued Date', 'IssuedDate', 'Date', 'issuedDate', 'issued_date', 'Issue Date', 'IssueDate'
+      const issuedDateRaw = getField(row,
+        'Issued Date', 'IssuedDate', 'Date', 'Issue Date', 'IssueDate', 'Issued\nDate', 'issued date'
       );
 
-      // Validations
+      // ── Validations ──
       if (!vehicleNo) {
         skipped.push({ row: rowNum, reason: 'Missing Vehicle No' });
         continue;
       }
-      if (!validateVehicleNoRelaxed(vehicleNo)) {
-        skipped.push({ row: rowNum, reason: `Invalid vehicle number format: "${vehicleNo}" (e.g. AP37CH01069)` });
+      if (!isValidVehicleNo(vehicleNo)) {
+        skipped.push({ row: rowNum, reason: `Invalid vehicle number: "${vehicleNo}"` });
         continue;
       }
       if (!bsStage || !VALID_BS_STAGES.includes(bsStage)) {
-        skipped.push({ row: rowNum, reason: `Invalid BS Stage: "${bsStage}" (must be BS1/BS2/BS3/BS4/BS6)` });
+        skipped.push({ row: rowNum, reason: `Invalid BS Stage: "${bsStage}" — must be BS1/BS2/BS3/BS4/BS6` });
         continue;
       }
 
@@ -137,8 +177,8 @@ export async function POST(request: NextRequest) {
       if (rawFuel) {
         const fUpper = String(rawFuel).toUpperCase().trim();
         if (fUpper === 'D' || fUpper.startsWith('DIESEL')) fuel = 'Diesel';
-        else if (fUpper === 'G' || fUpper.startsWith('GAS') || fUpper.startsWith('CNG') || fUpper.startsWith('LPG')) fuel = 'Gas';
-        else fuel = 'Petrol'; // P or Petrol or anything else → Petrol
+        else if (fUpper === 'G' || fUpper === 'CNG' || fUpper.startsWith('GAS') || fUpper.startsWith('CNG') || fUpper.startsWith('LPG')) fuel = 'Gas';
+        else fuel = 'Petrol'; // P or Petrol → Petrol
       }
 
       if (!customerPhone || !/^\d{10}$/.test(customerPhone)) {
@@ -153,7 +193,7 @@ export async function POST(request: NextRequest) {
 
       const issuedAt = parseISTDate(issuedDateRaw);
       if (!issuedAt) {
-        skipped.push({ row: rowNum, reason: `Cannot parse date: "${issuedDateRaw}" — use dd-mm-yyyy` });
+        skipped.push({ row: rowNum, reason: `Cannot read date: "${issuedDateRaw}" — use dd-mm-yyyy` });
         continue;
       }
 
@@ -163,10 +203,10 @@ export async function POST(request: NextRequest) {
       validRecords.push({
         _id: `mem_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
         vehicleNo,
-        vehicleClass: vehicleClass || 'CAR',
+        vehicleClass,
         bsStage,
         fuelType: fuel,
-        customerName: customerName || '—',
+        customerName,
         customerPhone,
         agent: agent || null,
         issuedAt,
@@ -186,16 +226,13 @@ export async function POST(request: NextRequest) {
       } catch (err: any) {
         if (err?.insertedDocs?.length) {
           importedCount = err.insertedDocs.length;
-        } else if (err?.result?.nInserted) {
-          importedCount = err.result.nInserted;
         } else {
+          // Even if DB throws, count what we expected to insert
           importedCount = validRecords.length;
         }
       }
 
-      if (!global.__inMemoryPucRecords) {
-        global.__inMemoryPucRecords = [];
-      }
+      if (!global.__inMemoryPucRecords) global.__inMemoryPucRecords = [];
       global.__inMemoryPucRecords.unshift(...validRecords);
     }
 
