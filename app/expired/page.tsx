@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import Header from '@/components/Header';
 import PucTable, { PucRecordRow } from '@/components/PucTable';
-import FilterBar from '@/components/FilterBar';
+import FilterBar, { FilterParams } from '@/components/FilterBar';
 
 export default function ExpiredPage() {
   const [records, setRecords] = useState<PucRecordRow[]>([]);
@@ -11,13 +11,22 @@ export default function ExpiredPage() {
   const [total, setTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
 
-  // Load all expired on mount (no filter applied)
-  const fetchRecords = useCallback(async (params: { startDate?: string; endDate?: string } = {}) => {
+  // Load expired records
+  const fetchRecords = useCallback(async (params: FilterParams = {}) => {
     setLoading(true);
     try {
       const urlParams = new URLSearchParams({ type: 'expired', limit: '500' });
       if (params.startDate) urlParams.set('startDate', params.startDate);
       if (params.endDate) urlParams.set('endDate', params.endDate);
+      if (params.year) urlParams.set('year', params.year);
+      if (params.month) urlParams.set('month', params.month);
+      if (params.week) urlParams.set('week', params.week);
+      if (params.day) urlParams.set('day', params.day);
+
+      if (typeof window !== 'undefined' && Object.keys(params).length > 0) {
+        const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+        window.history.replaceState(null, '', newUrl);
+      }
 
       const res = await fetch(`/api/puc?${urlParams}`);
       const data = await res.json();
@@ -34,12 +43,16 @@ export default function ExpiredPage() {
     fetchRecords();
   }, [fetchRecords]);
 
-  const handleExport = useCallback(async (params: { startDate?: string; endDate?: string }) => {
+  const handleExport = useCallback(async (params: FilterParams) => {
     setExporting(true);
     try {
       const urlParams = new URLSearchParams({ type: 'expired' });
       if (params.startDate) urlParams.set('startDate', params.startDate);
       if (params.endDate) urlParams.set('endDate', params.endDate);
+      if (params.year) urlParams.set('year', params.year);
+      if (params.month) urlParams.set('month', params.month);
+      if (params.week) urlParams.set('week', params.week);
+      if (params.day) urlParams.set('day', params.day);
 
       const res = await fetch(`/api/puc/export?${urlParams}`);
       if (!res.ok) throw new Error('Export failed');
@@ -68,7 +81,7 @@ export default function ExpiredPage() {
           <div>
             <h1 className="text-xl font-bold text-white">Expired PUC Records</h1>
             <p className="text-sm mt-0.5" style={{ color: '#64748b' }}>
-              All certificates that have passed their expiry date
+              All certificates that have passed their expiry date (search by year, month, week, or day)
             </p>
           </div>
           <div
