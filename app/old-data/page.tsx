@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import Header from '@/components/Header';
 import PucTable, { PucRecordRow } from '@/components/PucTable';
 import FilterBar, { FilterParams } from '@/components/FilterBar';
+import CreatePucModal from '@/components/CreatePucModal';
 
 export default function OldDataPage() {
   const [records, setRecords] = useState<PucRecordRow[]>([]);
@@ -11,7 +12,8 @@ export default function OldDataPage() {
   const [total, setTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [, setCurrentRange] = useState<FilterParams>({});
+  const [currentRange, setCurrentRange] = useState<FilterParams>({});
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const fetchRecords = useCallback(async (params: FilterParams) => {
     setLoading(true);
@@ -71,27 +73,62 @@ export default function OldDataPage() {
     }
   }, []);
 
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/puc?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to delete record');
+        return;
+      }
+      if (searched) {
+        fetchRecords(currentRange);
+      }
+    } catch {
+      alert('Error deleting record');
+    }
+  };
+
+  const handleCreateSuccess = () => {
+    setShowCreateModal(false);
+    if (searched) {
+      fetchRecords(currentRange);
+    }
+  };
+
   return (
     <div className="min-h-screen" style={{ background: '#020617' }}>
       <Header />
 
       <main className="max-w-screen-xl mx-auto px-4 sm:px-6 py-6 space-y-5">
-        {/* Page title */}
-        <div className="flex items-center justify-between">
+        {/* Page title & Create button */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-xl font-bold text-white">Old PUC Data</h1>
             <p className="text-sm mt-0.5" style={{ color: '#64748b' }}>
               Browse and export historical PUC records by year, month, week, or day
             </p>
           </div>
-          {searched && (
-            <div
-              className="text-sm px-3 py-1.5 rounded-lg"
-              style={{ background: 'rgba(14,165,233,0.1)', color: '#38bdf8' }}
+          <div className="flex items-center gap-3">
+            {searched && (
+              <div
+                className="text-sm px-3 py-1.5 rounded-lg"
+                style={{ background: 'rgba(14,165,233,0.1)', color: '#38bdf8' }}
+              >
+                {total} record{total !== 1 ? 's' : ''} found
+              </div>
+            )}
+            <button
+              id="old-data-create-btn"
+              className="btn-primary"
+              onClick={() => setShowCreateModal(true)}
             >
-              {total} record{total !== 1 ? 's' : ''} found
-            </div>
-          )}
+              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+              </svg>
+              Create PUC
+            </button>
+          </div>
         </div>
 
         {/* Filter bar */}
@@ -128,9 +165,17 @@ export default function OldDataPage() {
               searched ? 'No records found for the selected period' : 'Select a year/month/week/day and click Search to view records'
             }
             showStatus
+            onDelete={handleDelete}
           />
         </div>
       </main>
+
+      {showCreateModal && (
+        <CreatePucModal
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={handleCreateSuccess}
+        />
+      )}
     </div>
   );
 }
